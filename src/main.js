@@ -4,17 +4,28 @@ import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
+// v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
+const OLD_DEFAULTS = {
+  cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
+  faceColor: ['#f6f3e8'], sideColor: ['#e6e1d0'], baseColor: ['#2e9a4c'], blockedDarken: [0.42], shadowStrength: [0.45],
+  introDuration: [1.2], targetColorsCustom: [''], decoyLetters: ['TALXE'], letterColor: ['#1f9a3c'], flyDuration: [420],
+  burstDuration: [650], particleColor: ['#3fae3a'], particleColor2: ['#a8e25a'], particleCount: [22], selectScale: [1.15],
+};
 let S = loadSettings();
-// 旧版本设置迁移：v1 内置默认手指，v2 起未上传图片时不显示手指；只保留用户上传的图片数据
-function migrate(j) {
+// 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
+function migrate(j, fromStorage = false) {
   j = { ...j };
   if (typeof j.handImage !== 'string' || !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)) j.handImage = '';
+  if (fromStorage && (j.settingsVersion || 1) < 3) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;
   return j;
 }
 function loadSettings() {
-  try { const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); return { ...DEFAULTS, ...migrate(j) }; } catch (e) { return { ...DEFAULTS }; }
+  try { const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); return { ...DEFAULTS, ...migrate(j, true) }; } catch (e) { return { ...DEFAULTS }; }
 }
 let saveTimer = 0;
 function saveSettings() {
@@ -35,7 +46,9 @@ renderer.setPixelRatio(1);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.setClearColor(0x000000, 0);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
+const perspCam = new THREE.PerspectiveCamera(30, 1, 0.1, 500);
+const orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+let camera = perspCam;
 scene.add(new THREE.AmbientLight(0xffffff, 1.15));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
 dirLight.position.set(-0.4, -0.9, 1.6);
@@ -70,7 +83,6 @@ function layoutViewport() {
   const bottom = Math.round(H * (1 - 0.035));
   VP = { x: 0, y: top, w: W, h: bottom - top };
   renderer.setSize(VP.w, VP.h, false);
-  camera.aspect = VP.w / VP.h;
   fitCamera();
 }
 
@@ -93,9 +105,29 @@ function faceCanvas(key) {
   }
   return faceCache.get(key);
 }
+// 选中/飞行时的牌面：左下角向右上渐变的绿色覆盖（视频同款）
+function faceCanvasSel(key) {
+  const ck = key + '#sel';
+  if (!faceCache.has(ck)) {
+    const src = faceCanvas(key);
+    const c = document.createElement('canvas'); c.width = src.width; c.height = src.height;
+    const g = c.getContext('2d');
+    g.drawImage(src, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    const tint = hexRgb(S.selectTint);
+    const gr = g.createLinearGradient(0, c.height, c.width * 0.85, c.height * 0.15);
+    gr.addColorStop(0, `rgba(${tint.join(',')},0.9)`); gr.addColorStop(0.45, `rgba(${tint.join(',')},0.4)`); gr.addColorStop(1, `rgba(${tint.join(',')},0)`);
+    g.fillStyle = gr; g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = 'source-over';
+    g.strokeStyle = shade(S.selectTint, 0.8); g.lineWidth = c.width * 0.035;
+    rr(g, g.lineWidth / 2, g.lineWidth / 2, c.width - g.lineWidth, c.height - g.lineWidth, S.cornerRadius * c.width * 0.9); g.stroke();
+    faceCache.set(ck, c);
+  }
+  return faceCache.get(ck);
+}
 function faceTexture(key) {
   if (!texCache.has(key)) {
-    const t = new THREE.CanvasTexture(faceCanvas(key));
+    const t = new THREE.CanvasTexture(key.endsWith('#sel') ? faceCanvasSel(key.slice(0, -4)) : faceCanvas(key));
     t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
     texCache.set(key, t);
   }
@@ -111,7 +143,7 @@ function newGame(keepSeed = true) {
   clearFaceCache();
   G = {
     tiles: b.tiles.map(t => ({ ...t, state: 'board', dark: 0 })),
-    word: b.word, order: b.order, tw: b.tw, th: b.th,
+    word: b.word, order: b.order, tw: b.tw, th: b.th, letterPairs: b.letterPairs, letterLogical: 0, winT: 0,
     selected: [], tray: new Array(S.slotCount).fill(null), sprites: [], particles: [], ripples: [], flashes: [],
     cleared: false, clearT: 0, wordDoneT: 0, introT0: performance.now(), touched: false, letterCount: 0,
   };
@@ -121,27 +153,59 @@ function newGame(keepSeed = true) {
   fitCamera();
   updateStatus();
 }
+// 2.5D 侧面露出：对棋盘做剪切变换，高度 z 越高越向左上偏移，使牌的右/下侧面和绿色底座在纯俯视下可见
+function shearK() {
+  const th = Math.max(0.01, S.tileThick), tw = G ? G.tw : 1;
+  return { kx: S.sideRevealX * tw / th, ky: S.sideRevealY * tw / th };
+}
+function applyShear() {
+  const { kx, ky } = shearK();
+  boardGroup.matrixAutoUpdate = false;
+  boardGroup.matrix.set(1, 0, -kx, 0, 0, 1, ky, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+  boardGroup.matrixWorldNeedsUpdate = true;
+}
 function computeBounds() {
-  let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9, maxL = 0;
-  for (const t of G.tiles) { minx = Math.min(minx, t.x - G.tw / 2); maxx = Math.max(maxx, t.x + G.tw / 2); miny = Math.min(miny, t.y - G.th / 2); maxy = Math.max(maxy, t.y + G.th / 2); maxL = Math.max(maxL, t.layer); }
-  BOUNDS = { minx, maxx, miny, maxy, maxL };
+  let maxL = 0; for (const t of G.tiles) maxL = Math.max(maxL, t.layer);
+  BOUNDS = { maxL };
+}
+function shearedBounds() {
+  const { kx, ky } = shearK();
+  let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
+  for (const t of G.tiles) for (const z of [t.layer * S.tileThick, (t.layer + 1) * S.tileThick]) {
+    const x = t.x - kx * z, y = t.y + ky * z;
+    minx = Math.min(minx, x - G.tw / 2); maxx = Math.max(maxx, x + G.tw / 2); miny = Math.min(miny, y - G.th / 2); maxy = Math.max(maxy, y + G.th / 2);
+  }
+  return { minx, maxx, miny, maxy };
 }
 function fitCamera() {
-  if (!BOUNDS) return;
-  const b = BOUNDS;
+  if (!BOUNDS || !G) return;
+  const b = shearedBounds();
   const cx = (b.minx + b.maxx) / 2, cy = (b.miny + b.maxy) / 2;
-  const bw = b.maxx - b.minx, bh = (b.maxy - b.miny) + S.tileThick * (b.maxL + 1) * Math.sin(S.cameraTilt * Math.PI / 180);
-  camera.fov = S.cameraFov; camera.aspect = VP.w / VP.h;
-  const t = Math.tan(S.cameraFov * Math.PI / 360);
-  let d = Math.max((bh / 2) / t, (bw / 2) / (t * camera.aspect)) / S.boardScale;
-  d += S.tileThick * (b.maxL + 1);
   const tilt = S.cameraTilt * Math.PI / 180;
+  const zr = S.tileThick * (BOUNDS.maxL + 1);
+  const bw = b.maxx - b.minx, bh = (b.maxy - b.miny) * Math.cos(tilt) + zr * Math.sin(tilt);
+  const aspect = VP.w / VP.h;
   const ty = cy + S.boardOffsetY * bh;
-  camera.position.set(cx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
-  camera.up.set(0, 1, 0);
-  camera.lookAt(cx, ty, 0);
-  camera.near = Math.max(0.1, d * 0.2); camera.far = d * 4;
-  camera.updateProjectionMatrix();
+  if (S.cameraOrtho) {
+    camera = orthoCam;
+    const halfH = Math.max(bh / 2, bw / 2 / aspect) / S.boardScale;
+    orthoCam.left = -halfH * aspect; orthoCam.right = halfH * aspect; orthoCam.top = halfH; orthoCam.bottom = -halfH;
+    const d = 100;
+    orthoCam.position.set(cx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
+    orthoCam.up.set(0, 1, 0); orthoCam.lookAt(cx, ty, 0);
+    orthoCam.near = 1; orthoCam.far = d * 2 + 50;
+    orthoCam.updateProjectionMatrix();
+  } else {
+    camera = perspCam;
+    perspCam.fov = S.cameraFov; perspCam.aspect = aspect;
+    const t = Math.tan(S.cameraFov * Math.PI / 360);
+    let d = Math.max((bh / 2) / t, (bw / 2) / (t * aspect)) / S.boardScale + zr;
+    perspCam.position.set(cx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
+    perspCam.up.set(0, 1, 0); perspCam.lookAt(cx, ty, 0);
+    perspCam.near = Math.max(0.1, d * 0.2); perspCam.far = d * 4;
+    perspCam.updateProjectionMatrix();
+  }
+  camera.updateMatrixWorld();
 }
 
 let shadowTex = null;
@@ -166,6 +230,7 @@ function buildMeshes() {
   boardGroup.traverse(o => { if (o.isMesh) { o.material.dispose(); } });
   scene.remove(boardGroup);
   boardGroup = new THREE.Group(); scene.add(boardGroup);
+  applyShear();
   if (shadowTex) shadowTex.dispose();
   shadowTex = makeShadowTex();
   const tw = G.tw, th = G.th, thick = S.tileThick;
@@ -183,7 +248,7 @@ function buildMeshes() {
     const slab = new THREE.Mesh(slabGeo, new THREE.MeshLambertMaterial({ color: S.sideColor }));
     const face = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ map: faceTexture(t.key), alphaTest: 0.5 }));
     const sh = new THREE.Mesh(shGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, opacity: S.shadowStrength, depthWrite: false }));
-    sh.position.set(S.shadowOffset * tw * 0.8, -S.shadowOffset * th * 0.8, 0.004);
+    sh.position.set(S.shadowDX * tw, -S.shadowDY * tw, 0.004);
     sh.renderOrder = 1;
     base.userData.tile = slab.userData.tile = face.userData.tile = t;
     g.add(base, slab, face, sh);
@@ -203,17 +268,20 @@ const _c = new THREE.Color();
 function applyDark() {
   for (const t of G.tiles) {
     if (!t.mFace) continue;
-    const f = 1 - t.dark;
+    const f = 1 - t.dark, sel = t.state === 'selected';
+    const map = faceTexture(sel ? t.key + '#sel' : t.key);
+    if (t.mFace.map !== map) { t.mFace.map = map; t.mFace.needsUpdate = true; }
     t.mFace.color.setRGB(f, f, f);
-    t.mBase.color.set(S.baseColor).multiplyScalar(f);
-    t.mSlab.color.set(S.sideColor).multiplyScalar(f);
+    t.mBase.color.set(sel ? shade(S.selectTint, 0.75) : S.baseColor).multiplyScalar(f);
+    t.mSlab.color.set(sel ? S.selectTint : S.sideColor).multiplyScalar(f);
   }
 }
 
 // ---------------- Screen projections ----------------
 const _v = new THREE.Vector3();
 function project(x, y, z) {
-  _v.set(x, y, z).project(camera);
+  const { kx, ky } = shearK();
+  _v.set(x - kx * z, y + ky * z, z).project(camera);
   return { x: VP.x + (_v.x + 1) / 2 * VP.w, y: VP.y + (1 - _v.y) / 2 * VP.h };
 }
 function tileScreen(t) {
@@ -223,20 +291,21 @@ function tileScreen(t) {
 }
 function slotRect(i) {
   const n = S.slotCount, topH = H * S.topBarHeight;
-  const ax = W * 0.385, aw = W * 0.6;
-  let sh = topH * 0.66 * S.slotSize, sw = sh * 0.9;
-  const gap = sw * 0.1;
+  const ax = W * 0.36, aw = W * 0.54;
+  let sh = topH * 0.58 * S.slotSize, sw = sh * 0.78;
+  const gap = sw * 0.12;
   if (n * (sw + gap) > aw) { sw = aw / n - gap; sh = sw / 0.9; }
   const total = n * sw + (n - 1) * gap;
   const x0 = ax + (aw - total) / 2;
-  return { x: x0 + i * (sw + gap), y: topH * 0.48 - sh / 2, w: sw, h: sh, cx: x0 + i * (sw + gap) + sw / 2, cy: topH * 0.48 };
+  return { x: x0 + i * (sw + gap), y: topH * 0.45 - sh / 2, w: sw, h: sh, cx: x0 + i * (sw + gap) + sw / 2, cy: topH * 0.45 };
 }
 function slotTileSize(i) {
-  const r = slotRect(i); let w = r.w * 0.84, h = w * G.th / G.tw;
-  const thk = w * S.tileThick * 0.5;
-  if (h + thk > r.h * 0.9) { const k = r.h * 0.9 / (h + thk); w *= k; h *= k; }
-  return { x: r.cx, y: r.cy - w * S.tileThick * 0.25, w, h };
+  const r = slotRect(i); let w = r.w * 0.98, h = w * G.th / G.tw;
+  const ry = Math.abs(S.sideRevealY) * w;
+  if (h + ry > r.h * 1.0) { const k = r.h * 1.0 / (h + ry); w *= k; h *= k; }
+  return { x: r.cx - S.sideRevealX * w / 2, y: r.cy - S.sideRevealY * w / 2, w, h };
 }
+function boardCenterScreen() { return { x: VP.x + VP.w / 2, y: VP.y + VP.h / 2 }; }
 
 // ---------------- Tweens / sprites ----------------
 const tweens = [];
@@ -273,7 +342,7 @@ function clickTile(t, fromHand = false) {
   G.touched = true;
   if (t.state === 'selected') { deselect(t); return true; }
   if (t.state !== 'board' || !isFree(t)) return false;
-  if (isTarget(t.key)) return collectLetter(t);
+  if (isTarget(t.key) && !G.letterPairs) return collectLetter(t);
   if (S.trayMode === 'tray') { const j = freeTraySlot(); if (j >= 0) return toTray(t, j); }
   const sel = G.selected.map(id => G.tiles[id]);
   if (sel.length && sel[0].key !== t.key) sel.forEach(deselect);
@@ -288,45 +357,92 @@ function clickTile(t, fromHand = false) {
   if (G.selected.length >= S.matchCount) matchSelected();
   return true;
 }
+// 选中：牌留在原位，染上绿色（视频：点击后立即变绿，等待第二张）
 function select(t) {
-  t.state = 'selected'; t.obj.visible = false;
-  const sp = makeSprite(t, tileScreen(t)); sp.glow = 1; t.sprite = sp;
+  t.state = 'selected';
   G.selected.push(t.id);
-  tween(140, k => { sp.scale = lerp(1, S.selectScale, k); sp.lift = k; }, easeBack);
+  applyDark();
+  if (S.selectScale > 1.001) tween(160, k => { const s = 1 + (S.selectScale - 1) * Math.sin(k * Math.PI / 2); if (t.state === 'selected') t.obj.scale.set(s, s, 1); }, easeOut);
 }
 function deselect(t) {
   if (t.state !== 'selected') return;
   t.state = 'board';
   G.selected = G.selected.filter(id => id !== t.id);
-  const sp = t.sprite; t.sprite = null;
-  const s0 = sp.scale;
-  tween(120, k => { sp.scale = lerp(s0, 1, k); sp.lift = 1 - k; if (k >= 1) { removeSprite(sp); t.obj.visible = t.state === 'board'; } }, easeOut);
+  t.obj.scale.set(1, 1, 1);
+  applyDark();
 }
+const bez3 = (a, b, c, d, k) => { const u = 1 - k; return u * u * u * a + 3 * u * u * k * b + 3 * u * k * k * c + k * k * k * d; };
+// 配对：两张牌同时脱离棋盘，放大并先向外侧飞出，再弧线汇合到中间并排，随后绿叶爆开、缩小消失
 function matchSelected() {
   const ts = G.selected.map(id => G.tiles[id]); G.selected = [];
-  ts.forEach(t => { t.state = 'gone'; });
+  const scr = ts.map(t => tileScreen(t));
+  const key = ts[0].key;
+  ts.forEach(t => { t.state = 'gone'; t.obj.visible = false; t.obj.scale.set(1, 1, 1); });
+  if (isTarget(key)) G.letterLogical = (G.letterLogical || 0) + 1;
   refreshDark();
-  const sps = ts.map(t => t.sprite);
-  let cx = 0, cy = 0; sps.forEach(s => { cx += s.x; cy += s.y; }); cx /= sps.length; cy /= sps.length;
-  const w = sps[0].w * S.selectScale;
-  cx = Math.max(w * sps.length / 2 + 10, Math.min(W - w * sps.length / 2 - 10, cx));
-  const dur = S.flyDuration * 0.75;
-  sps.forEach((s, i) => {
-    s.z = 5;
-    const tx = cx + (i - (sps.length - 1) / 2) * w * 1.0;
-    moveSprite(s, { x: tx, y: cy, scale: S.selectScale * 1.05 }, dur, easeIn).then(() => {
-      if (i === sps.length - 1) {
-        setTimeout(() => { sps.forEach(sp => burstSprite(sp)); updateStatus(); }, 90);
-      }
-    });
+  const n = ts.length;
+  const sps = ts.map((t, i) => { const sp = makeSprite(t, scr[i]); sp.tint = 1; sp.z = 5; sp.moving = true; return sp; });
+  const bc = boardCenterScreen();
+  let mx = sps.reduce((a, s) => a + s.x, 0) / n, my = sps.reduce((a, s) => a + s.y, 0) / n;
+  mx = lerp(mx, bc.x, S.meetCenterPull); my = lerp(my, bc.y, S.meetCenterPull * 0.5);
+  const w = scr[0].w * S.flyScale, hh = scr[0].h * S.flyScale;
+  mx = Math.max(w * n / 2 + 8 * U, Math.min(W - w * n / 2 - 8 * U, mx));
+  my = Math.max(VP.y + hh, Math.min(VP.y + VP.h - hh, my));
+  const D = S.outwardAmount * scr[0].w;
+  const order = sps.map((s, i) => i).sort((a, b) => sps[a].x - sps[b].x);
+  const clampX = x => Math.max(w * 0.45, Math.min(W - w * 0.45, x));
+  const flights = order.map((si, rank) => {
+    const sp = sps[si];
+    const tx = mx + (rank - (n - 1) / 2) * w, ty = my;
+    const side = n === 1 ? 1 : (rank < (n - 1) / 2 ? -1 : 1);
+    let ax = sp.x - mx, ay = (sp.y - my) * 0.5; const al = Math.hypot(ax, ay) || 1;
+    ax = ax / al; ay = ay / al;
+    if (Math.abs(ax) < 0.4) ax = side * 0.6;
+    const p0 = { x: sp.x, y: sp.y }, p1 = { x: clampX(sp.x + ax * D * 1.3), y: sp.y + ay * D * 0.8 };
+    const p2 = { x: clampX(tx + side * D), y: ty }, p3 = { x: tx, y: ty };
+    const w0 = sp.w, h0 = sp.h;
+    return tween(S.flyDuration, k => {
+      sp.x = bez3(p0.x, p1.x, p2.x, p3.x, k); sp.y = bez3(p0.y, p1.y, p2.y, p3.y, k);
+      sp.scale = 1 + (S.flyScale - 1) * Math.min(1, k / 0.3);
+      sp.w = w0; sp.h = h0;
+    }, easeInOut);
   });
+  Promise.all(flights).then(() => burstPair(sps, mx, my, key, w));
   updateStatus();
 }
+async function burstPair(sps, mx, my, key, w) {
+  spawnParticles(mx, my, w * sps.length * 0.6, true);
+  const b = S.burstDuration;
+  const s0 = sps.map(s => s.scale);
+  await tween(b * 0.45, k => sps.forEach((s, i) => { s.scale = s0[i] * (1 + 0.06 * Math.sin(k * Math.PI / 2)); }), easeOut);
+  const s1 = sps.map(s => s.scale);
+  await tween(b * 0.3, k => sps.forEach((s, i) => { s.scale = s1[i] * (1 - 0.6 * k); s.alpha = 1 - k; }), easeIn);
+  sps.forEach(s => { s.moving = false; removeSprite(s); });
+  updateStatus();
+  if (isTarget(key) && G.letterPairs) letterToSlot(key, mx, my, w / S.flyScale);
+}
+function letterToSlot(key, x, y, w) {
+  const idx = targetIndex(key);
+  if (idx >= S.slotCount) return;
+  const sp = { key, x, y, w, h: w * G.th / G.tw, scale: 1, alpha: 1, z: 6, moving: true };
+  G.sprites.push(sp);
+  const entry = { id: -1, key, sprite: sp, arrived: false, letter: true };
+  if (G.tray[idx] && !G.tray[idx].letter) { const j = freeTraySlot(); if (j >= 0 && j !== idx) { G.tray[j] = G.tray[idx]; moveSprite(G.tray[j].sprite, slotTileSize(j), 200); } }
+  G.tray[idx] = entry;
+  const to = slotTileSize(idx);
+  moveSprite(sp, to, Math.max(1, S.letterFlyDuration), easeOut).then(() => {
+    entry.arrived = true; sp.z = 0; sp.moving = false;
+    sp.scale = 1.35; tween(260, k => { sp.scale = lerp(1.35, 1, k); }, easeBack);
+    spawnParticles(to.x, to.y, to.w * 1.1, true, 0.6);
+    G.letterCount++;
+    if (G.letterCount >= G.word.length) G.wordDoneT = performance.now();
+    updateStatus();
+  });
+}
 function burstSprite(sp) {
-  spawnParticles(sp.x, sp.y, sp.w * sp.scale);
-  G.flashes.push({ x: sp.x, y: sp.y, r: sp.w * 0.9, t0: performance.now() });
+  spawnParticles(sp.x, sp.y, sp.w * sp.scale, true, 0.6);
   const s0 = sp.scale;
-  tween(160, k => { sp.scale = s0 * (1 + k * 0.3); sp.alpha = 1 - k; if (k >= 1) removeSprite(sp); }, easeOut);
+  tween(220, k => { sp.scale = s0 * (1 - 0.5 * k); sp.alpha = 1 - k; if (k >= 1) removeSprite(sp); }, easeIn);
 }
 function freeTraySlot() {
   const order = [];
@@ -373,6 +489,7 @@ function collectLetter(t) {
     G.letterCount++;
     if (G.letterCount >= G.word.length) G.wordDoneT = performance.now();
   });
+  G.letterLogical = (G.letterLogical || 0) + 1;
   updateStatus();
   return true;
 }
@@ -380,18 +497,26 @@ function shake(t) {
   const x0 = t.obj.position.x;
   tween(300, k => { t.obj.position.x = x0 + Math.sin(k * 30) * 0.05 * (1 - k); }, x => x);
 }
-function spawnParticles(x, y, size) {
-  const n = Math.round(S.particleCount);
+// 绿叶粒子：细长尖叶，绕中心旋转并向外散开（视频同款）
+function spawnParticles(x, y, size, swirl = true, countScale = 1) {
+  const n = Math.round(S.particleCount * countScale);
   const c1 = hexRgb(S.particleColor), c2 = hexRgb(S.particleColor2);
+  const dir = Math.random() < 0.5 ? -1 : 1;
   for (let i = 0; i < n; i++) {
-    const a = Math.random() * Math.PI * 2, sp = rand(0.25, 1) * size * 2.6 * S.particleSpeed;
     const m = Math.random();
     G.particles.push({
-      x: x + rand(-0.3, 0.3) * size, y: y + rand(-0.4, 0.4) * size, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - size * 0.6,
-      rot: Math.random() * 6.28, vr: rand(-8, 8), s: rand(0.12, 0.26) * size * S.particleSize,
-      col: `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`, t0: performance.now(), life: S.burstDuration * rand(0.7, 1.1),
+      cx: x, cy: y, a: (i / n) * Math.PI * 2 + rand(-0.3, 0.3), r0: rand(0.15, 0.55) * size,
+      vr: rand(0.5, 1.3) * size * S.particleSpeed, va: dir * rand(2.5, 5) * S.particleSpeed,
+      rot: rand(0, 6.28), vrot: rand(-6, 6), s: rand(0.22, 0.36) * size * S.particleSize * (size > 0 ? 1 : 0),
+      col: `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`, t0: performance.now(), life: S.burstDuration * rand(0.75, 1.1),
     });
   }
+}
+function drawLeaf(len, wid, col) {
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(-len / 2, 0); ctx.quadraticCurveTo(0, -wid, len / 2, 0); ctx.quadraticCurveTo(0, wid, -len / 2, 0); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = Math.max(1, wid * 0.12);
+  ctx.beginPath(); ctx.moveTo(-len * 0.42, 0); ctx.lineTo(len * 0.42, 0); ctx.stroke();
 }
 
 // ---------------- Hand ----------------
@@ -433,7 +558,7 @@ async function autoSolve() {
   HAND.visible = true;
   if (HAND.y > H) resetHand();
   // 等待开场展示
-  const introLeft = S.introWord ? S.introDuration * 1000 - (performance.now() - G.introT0) : 0;
+  const introLeft = S.introWord ? (S.introDelay + S.introDuration + 0.3) * 1000 - (performance.now() - G.introT0) : 0;
   await sleep(Math.max(250, introLeft));
   if (!alive()) return;
   const m = S.matchCount;
@@ -441,6 +566,10 @@ async function autoSolve() {
   if (!G.touched) groups = G.order.map(g => g.slice());
   if (!groups) groups = repairPartition(G.tiles, G.order, m);
   if (!groups) { const p = solve(G.tiles, m, null); if (p && validatePartition(G.tiles, p)) groups = p; }
+  if (!groups && S.winCondition === 'word' && G.word.length) { // 整盘无解时，只要还能集齐单词也可以继续
+    const p = solve(G.tiles, m, null, 60000, al => !G.tiles.some((t, i) => al[i] && isTarget(t.key)));
+    if (p && validatePartition(G.tiles, p)) groups = p;
+  }
   if (!groups) { toast('当前局面无解（手动操作造成），请重新开始'); AUTO.running = false; updateButtons(); return; }
   groups = groups.map(g => g.filter(id => G.tiles[id].state !== 'gone')).filter(g => g.length);
   const isLetterG = g => isTarget(G.tiles[g[0]].key);
@@ -464,7 +593,16 @@ async function autoSolve() {
   };
   const dScreen = (id, p) => { const s = tileScreen(G.tiles[id]); return Math.hypot(s.x - p.x, s.y - p.y); };
   let stuck = 0;
+  const wordWin = S.winCondition === 'word' && G.word.length > 0;
+  const targetsLeft = () => G.tiles.some(t => isTarget(t.key) && (t.state === 'board' || t.state === 'selected' || t.state === 'tray'));
+  // 目标字母上方（直接或间接）压着的牌：优先消除它们以尽快解放字母
+  const neededSet = () => {
+    const need = new Set(), st = G.tiles.filter(t => isTarget(t.key) && aliveOnBoard(t));
+    while (st.length) { const t = st.pop(); for (const j of t.coveredBy) { const u = G.tiles[j]; if (aliveOnBoard(u) && !need.has(j)) { need.add(j); st.push(u); } } }
+    return need;
+  };
   while (groups.length && alive()) {
+    if (wordWin && !targetsLeft()) break;
     const free = groups.filter(gFree);
     const letterG = free.filter(isLetterG).sort((a, b) => targetIndex(G.tiles[a[0]].key) - targetIndex(G.tiles[b[0]].key));
     const normalG = free.filter(g => !isLetterG(g));
@@ -473,12 +611,16 @@ async function autoSolve() {
     if (letterG.length) {
       if (S.letterOrder === 'early') pick = letterG[0];
       else if (S.letterOrder === 'word') { if (letterG[0] === allLetters[0]) pick = letterG[0]; }
-      else if (S.letterOrder === 'natural') { if (Math.random() < 0.15) pick = letterG[Math.floor(Math.random() * letterG.length)]; }
+      else if (S.letterOrder === 'natural') { if (Math.random() < (G.letterPairs ? 0.6 : 0.15)) pick = letterG[Math.floor(Math.random() * letterG.length)]; }
     }
     if (!pick && normalG.length) {
       const hp = { x: HAND.x, y: Math.min(HAND.y, H) };
-      let best = Infinity;
-      for (const g of normalG) {
+      let best = Infinity, pool = normalG;
+      if (targetsLeft() && S.letterOrder !== 'late') {
+        const need = neededSet(); const helpful = normalG.filter(g => g.some(id => need.has(id)));
+        if (helpful.length && Math.random() >= S.extraPairChance) pool = helpful;
+      }
+      for (const g of pool) {
         const sorted = g.slice().sort((a, b) => dScreen(a, hp) - dScreen(b, hp));
         let sc = dScreen(sorted[0], hp);
         for (let i = 1; i < sorted.length; i++) sc += dScreen(sorted[i], tileScreen(G.tiles[sorted[i - 1]])) * 0.6;
@@ -562,19 +704,22 @@ function onCleared() {
 }
 
 // ---------------- Drawing ----------------
-function drawTile2D(key, x, y, w, h, alpha = 1, glow = 0) {
-  const th = w * S.tileThick * 0.5, slabT = th * (1 - S.baseRatio);
+// 2D 牌（飞行/托盘用），与 3D 牌外观一致：牌面 + 向右下露出的白色侧面与绿色底座
+function drawTile2D(key, x, y, w, h, alpha = 1, tint = 0) {
   const r = S.cornerRadius * w;
+  const rx = S.sideRevealX * w, ry = S.sideRevealY * w;
   ctx.save(); ctx.globalAlpha = alpha;
   const x0 = x - w / 2, y0 = y - h / 2;
-  ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = w * 0.15; ctx.shadowOffsetX = w * 0.06; ctx.shadowOffsetY = w * 0.08;
-  if (glow) { ctx.shadowColor = `rgba(120,255,120,${0.9 * glow})`; ctx.shadowBlur = w * 0.45 * glow; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; }
-  ctx.fillStyle = shade(S.baseColor, 0.85); rr(ctx, x0, y0 + th, w, h, r); ctx.fill();
+  const steps = 8, baseFrom = 1 - S.baseRatio;
+  ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = w * 0.18; ctx.shadowOffsetX = S.shadowDX * w * 1.5; ctx.shadowOffsetY = S.shadowDY * w * 1.5 + w * 0.04;
+  ctx.fillStyle = tint ? shade(S.selectTint, 0.6) : shade(S.baseColor, 0.8); rr(ctx, x0 + rx, y0 + ry, w, h, r); ctx.fill();
   ctx.shadowColor = 'transparent';
-  ctx.fillStyle = S.baseColor; rr(ctx, x0, y0 + th * 0.92, w, h, r); ctx.fill();
-  ctx.fillStyle = shade(S.sideColor, 0.92); rr(ctx, x0, y0 + slabT, w, h, r); ctx.fill();
-  ctx.drawImage(faceCanvas(key), x0, y0, w, h);
-  if (glow) { ctx.strokeStyle = `rgba(110,240,110,${glow})`; ctx.lineWidth = Math.max(2, w * 0.05); rr(ctx, x0, y0, w, h + slabT, r); ctx.stroke(); }
+  for (let i = steps; i >= 1; i--) {
+    const f = i / steps;
+    ctx.fillStyle = f > baseFrom ? (tint ? shade(S.selectTint, 0.75) : S.baseColor) : (tint ? S.selectTint : shade(S.sideColor, 0.95));
+    rr(ctx, x0 + rx * f, y0 + ry * f, w, h, r); ctx.fill();
+  }
+  ctx.drawImage(tint ? faceCanvasSel(key) : faceCanvas(key), x0, y0, w, h);
   ctx.restore();
 }
 function drawBackground() {
@@ -609,15 +754,17 @@ function drawTopBar(now) {
     ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 3 * U; rr(ctx, r.x + 1.5 * U, r.y + 1.5 * U, r.w - 3 * U, r.h - 3 * U, r.w * 0.11); ctx.stroke();
     ctx.strokeStyle = shade(S.topBarColor, 1.6); ctx.lineWidth = 1.5 * U; rr(ctx, r.x, r.y, r.w, r.h, r.w * 0.12); ctx.stroke();
   }
-  // 开场目标词
+  // 开场目标词：字母逐个弹出，停留后淡出（视频 0.4s~2.6s）
   if (S.introWord && G) {
-    const el = (now - G.introT0) / 1000, dur = S.introDuration;
-    if (el < dur + 0.35) {
-      const a = el < dur ? 1 : 1 - (el - dur) / 0.35;
+    const el = (now - G.introT0) / 1000, end = S.introDelay + S.introDuration;
+    if (el > S.introDelay && el < end + 0.3) {
+      const fade = el < end ? 1 : 1 - (el - end) / 0.3;
       for (let i = 0; i < G.word.length; i++) {
         if (G.tray[i] && G.tray[i].letter) continue;
-        const s = slotTileSize(i);
-        drawTile2D('T' + G.word[i] + ':' + i, s.x, s.y, s.w, s.h, a);
+        const t0 = S.introDelay + 0.1 + i * S.introStagger; if (el < t0) continue;
+        const k = Math.min(1, (el - t0) / 0.25), sc = 0.4 + 0.6 * easeBack(k);
+        const sl = slotTileSize(i);
+        drawTile2D('T' + G.word[i] + ':' + i, sl.x, sl.y, sl.w * sc, sl.h * sc, fade * Math.min(1, k * 2));
       }
     }
   }
@@ -689,13 +836,14 @@ function drawEffects(now) {
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + k), 0, 7); ctx.fill(); return true;
   });
   // 树叶粒子
-  const dt = 1 / 60;
   G.particles = G.particles.filter(p => {
     const k = (now - p.t0) / p.life; if (k >= 1) return false;
-    p.vy += H * 0.9 * dt * 0.6; p.vx *= 0.97; p.vy *= 0.97; p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.vr * dt;
-    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.globalAlpha = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;
-    ctx.fillStyle = p.col; ctx.beginPath(); ctx.ellipse(0, 0, p.s, p.s * 0.45, 0, 0, 7); ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = Math.max(1, p.s * 0.08); ctx.beginPath(); ctx.moveTo(-p.s * 0.9, 0); ctx.lineTo(p.s * 0.9, 0); ctx.stroke();
+    const t = k * p.life / 1000;
+    const r = p.r0 + p.vr * t * (1 - k * 0.4), a = p.a + p.va * t * (1 - k * 0.5);
+    const x = p.cx + Math.cos(a) * r, y = p.cy + Math.sin(a) * r * 0.85 + k * k * p.s * 0.8;
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a + Math.PI / 2 * Math.sign(p.va) + p.rot + p.vrot * t * 0.3);
+    ctx.globalAlpha = Math.min(1, k * 6) * (k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35);
+    drawLeaf(p.s, p.s * 0.28, p.col);
     ctx.restore(); return true;
   });
   // 点击波纹
@@ -722,7 +870,7 @@ function drawHand() {
   ctx.drawImage(im, -ax, -ay, w, h);
   ctx.restore();
 }
-function endButtonRect() { return { x: W / 2, y: H * 0.68, w: W * 0.56, h: H * 0.066 }; }
+function endButtonRect() { return { x: W / 2, y: H * 0.69, w: W * 0.62, h: H * 0.082 }; }
 function drawEndCard(now) {
   if (!S.endCard || !G.cleared) return;
   const el = now - G.clearT - S.endDelay; if (el < 0) return;
@@ -730,16 +878,25 @@ function drawEndCard(now) {
   ctx.save(); ctx.globalAlpha = a;
   const g = ctx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.45, H * 0.7);
   g.addColorStop(0, S.endBg1); g.addColorStop(1, S.endBg2); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  // 光线
-  ctx.save(); ctx.translate(W / 2, H * 0.36); ctx.rotate(el / 6000);
-  ctx.fillStyle = 'rgba(255,255,220,0.06)';
-  for (let i = 0; i < 12; i++) { ctx.rotate(Math.PI / 6); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(H, -H * 0.12); ctx.lineTo(H, H * 0.12); ctx.fill(); }
+  // 顶部挂灯与星星（视频结束页同款）
+  ctx.save(); ctx.strokeStyle = 'rgba(255,230,150,.35)'; ctx.lineWidth = 1.2 * U;
+  for (const [x1, x2, sag] of [[-0.05, 0.55, 0.06], [0.45, 1.05, 0.07], [0.1, 0.9, 0.11]]) {
+    ctx.beginPath(); ctx.moveTo(W * x1, 0); ctx.quadraticCurveTo(W * (x1 + x2) / 2, H * sag * 2, W * x2, 0); ctx.stroke();
+    for (let k = 1; k < 12; k++) { const tt = k / 12, x = lerp(W * x1, W * x2, tt), y = H * sag * 2 * 2 * tt * (1 - tt); ctx.fillStyle = `rgba(255,236,170,${0.5 + 0.5 * Math.sin(el / 200 + k)})`; ctx.beginPath(); ctx.arc(x, y, 2 * U, 0, 7); ctx.fill(); }
+  }
+  for (const [x, len] of [[0.06, 0.2], [0.14, 0.13], [0.92, 0.2], [0.96, 0.08]]) {
+    ctx.beginPath(); ctx.moveTo(W * x, 0); ctx.lineTo(W * x, H * len); ctx.stroke(); star(W * x, H * len + 8 * U, 11 * U, '#f5d36b');
+  }
   ctx.restore();
+  // 图标背后的光晕
+  const gy = H * 0.3, hg = ctx.createRadialGradient(W / 2, gy, 0, W / 2, gy, W * 0.42);
+  hg.addColorStop(0, 'rgba(255,255,170,.75)'); hg.addColorStop(0.45, 'rgba(200,255,120,.25)'); hg.addColorStop(1, 'rgba(200,255,120,0)');
+  ctx.fillStyle = hg; ctx.fillRect(0, gy - W * 0.45, W, W * 0.9);
   // 图标
-  const s = W * 0.36 * (0.85 + 0.15 * easeBack(Math.min(1, el / 500))), ix = W / 2 - s / 2, iy = H * 0.36 - s / 2;
-  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 30 * U; ctx.shadowOffsetY = 10 * U;
-  rr(ctx, ix, iy, s, s, s * 0.22); ctx.fillStyle = '#fff'; ctx.fill(); ctx.restore();
-  ctx.save(); rr(ctx, ix + s * 0.03, iy + s * 0.03, s * 0.94, s * 0.94, s * 0.2); ctx.clip();
+  const s = W * 0.41 * (0.85 + 0.15 * easeBack(Math.min(1, el / 500))), ix = W / 2 - s / 2, iy = gy - s / 2;
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 24 * U; ctx.shadowOffsetY = 8 * U;
+  rr(ctx, ix, iy, s, s, s * 0.2); const bgd = ctx.createLinearGradient(0, iy, 0, iy + s); bgd.addColorStop(0, '#ffe58a'); bgd.addColorStop(1, '#b8801e'); ctx.fillStyle = bgd; ctx.fill(); ctx.restore();
+  ctx.save(); rr(ctx, ix + s * 0.03, iy + s * 0.03, s * 0.94, s * 0.94, s * 0.18); ctx.clip();
   if (IMG.endIcon) ctx.drawImage(IMG.endIcon, ix, iy, s, s);
   else {
     const ig = ctx.createLinearGradient(0, iy, 0, iy + s); ig.addColorStop(0, '#3ed36a'); ig.addColorStop(1, '#0b7a33'); ctx.fillStyle = ig; ctx.fillRect(ix, iy, s, s);
@@ -751,26 +908,39 @@ function drawEndCard(now) {
       pips.forEach(([px, py]) => { ctx.beginPath(); ctx.arc(px * dw, py * dh, dw * 0.09, 0, 7); ctx.fill(); });
       ctx.restore();
     };
-    domino(ix + s * 0.38, iy + s * 0.5, -0.35, [[-.22, -.36], [.22, -.14], [0, -.25], [-.22, .14], [.22, .36]]);
-    domino(ix + s * 0.63, iy + s * 0.48, 0.3, [[0, -.25], [-.22, .14], [.22, .36], [0, .25]]);
+    domino(ix + s * 0.38, iy + s * 0.46, -0.35, [[-.22, -.36], [.22, -.14], [0, -.25], [-.22, .14], [.22, .36]]);
+    domino(ix + s * 0.63, iy + s * 0.44, 0.3, [[0, -.25], [-.22, .14], [.22, .36], [0, .25]]);
+    ctx.fillStyle = '#d8202a'; ctx.beginPath(); ctx.ellipse(ix + s / 2, iy + s * 1.02, s * 0.62, s * 0.2, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#ffe14d'; ctx.font = `900 ${s * 0.16}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('cash', ix + s / 2, iy + s * 0.9);
   }
   ctx.restore();
-  // 标题
-  ctx.font = `900 ${W * 0.1}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round'; ctx.strokeStyle = '#4a2a00'; ctx.lineWidth = W * 0.016; ctx.strokeText(S.endTitle, W / 2, H * 0.56);
-  ctx.fillStyle = S.endTitleColor; ctx.fillText(S.endTitle, W / 2, H * 0.56);
+  // 标题：金色渐变 + 深红描边
+  const ty = H * 0.53;
+  ctx.font = `900 ${W * 0.105}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.strokeStyle = '#7a1d0c'; ctx.lineWidth = W * 0.02; ctx.strokeText(S.endTitle, W / 2, ty + 3 * U);
+  const tg = ctx.createLinearGradient(0, ty - W * 0.05, 0, ty + W * 0.05); tg.addColorStop(0, '#fff6b0'); tg.addColorStop(0.5, S.endTitleColor); tg.addColorStop(1, '#e08a12');
+  ctx.fillStyle = tg; ctx.fillText(S.endTitle, W / 2, ty);
   // 按钮
   const b = endButtonRect(), pul = 1 + 0.04 * Math.sin(el / 160);
   ctx.save(); ctx.translate(b.x, b.y); ctx.scale(pul, pul);
   ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 16 * U; ctx.shadowOffsetY = 6 * U;
   const bg = ctx.createLinearGradient(0, -b.h / 2, 0, b.h / 2); bg.addColorStop(0, shade(S.endBtnColor, 1.25)); bg.addColorStop(1, shade(S.endBtnColor, 0.75));
   ctx.fillStyle = bg; rr(ctx, -b.w / 2, -b.h / 2, b.w, b.h, b.h / 2); ctx.fill();
-  ctx.shadowColor = 'transparent'; ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 3 * U; ctx.stroke();
+  ctx.shadowColor = 'transparent'; ctx.strokeStyle = '#e8b830'; ctx.lineWidth = 4 * U; ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,.28)'; rr(ctx, -b.w / 2 + b.h * 0.25, -b.h / 2 + b.h * 0.1, b.w - b.h * 0.5, b.h * 0.32, b.h * 0.16); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.font = `bold ${b.h * 0.45}px "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif`; ctx.fillText(S.endButton, 0, 2 * U);
   ctx.restore();
   ctx.restore();
 }
 
+// 开场时棋盘整体压暗（视频 0.5s 起变暗，字母出完后恢复）
+function drawIntroDim(now) {
+  if (!S.introWord || !G || S.introDim <= 0) return;
+  const el = (now - G.introT0) / 1000, st = S.introDelay, end = S.introDelay + S.introDuration;
+  if (el < st || el > end + 0.3) return;
+  const a = el < st + 0.15 ? (el - st) / 0.15 : el < end ? 1 : 1 - (el - end) / 0.3;
+  ctx.fillStyle = `rgba(0,0,0,${S.introDim * a})`; ctx.fillRect(VP.x, VP.y, VP.w, VP.h);
+}
 let lastFrame = performance.now();
 function frame() {
   const now = performance.now();
@@ -784,7 +954,11 @@ function frame() {
     let changed = false;
     for (const t of G.tiles) { if (Math.abs(t.dark - t.darkTarget) > 0.002) { t.dark += (t.darkTarget - t.dark) * Math.min(1, dt * 10); changed = true; } }
     if (changed) applyDark();
-    if (!G.cleared && G.tiles.length && G.tiles.every(t => t.state === 'gone') && !G.sprites.some(s => s.moving)) onCleared();
+    if (!G.cleared && G.tiles.length) {
+      const wordWin = S.winCondition === 'word' && G.word.length > 0;
+      const done = wordWin ? G.letterCount >= G.word.length : G.tiles.every(t => t.state === 'gone');
+      if (done && !G.sprites.some(s => s.moving)) { if (!G.winT) G.winT = now; if (now - G.winT > (wordWin ? 1000 : 0)) onCleared(); }
+    }
   }
   HAND.alpha += ((HAND.visible ? 1 : 0) - HAND.alpha) * Math.min(1, dt * 12);
   // draw
@@ -793,12 +967,13 @@ function frame() {
   if (G) {
     renderer.render(scene, camera);
     ctx.drawImage(glCanvas, VP.x, VP.y, VP.w, VP.h);
+    drawIntroDim(now);
   }
   drawTopBar(now);
   if (G) {
     // 托盘内的牌
     const sorted = G.sprites.slice().sort((a, b) => a.z - b.z);
-    for (const sp of sorted) drawTile2D(sp.key, sp.x, sp.y - (sp.lift || 0) * sp.h * 0.06, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.glow ? 1 : 0);
+    for (const sp of sorted) drawTile2D(sp.key, sp.x, sp.y, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0);
     drawEffects(now);
   }
   drawDisclaimer();
@@ -821,7 +996,7 @@ function pickTile(p) {
   const nd = new THREE.Vector2((p.x - VP.x) / VP.w * 2 - 1, -((p.y - VP.y) / VP.h * 2 - 1));
   raycaster.setFromCamera(nd, camera);
   const objs = [];
-  for (const t of G.tiles) if (t.state === 'board') objs.push(...t.pick);
+  for (const t of G.tiles) if (t.state === 'board' || t.state === 'selected') objs.push(...t.pick);
   const hits = raycaster.intersectObjects(objs, false);
   if (!hits.length) return null;
   let best = null;
@@ -853,7 +1028,7 @@ function onSetting(item, v) {
   if (item.kind === 'regen') scheduleRegen();
   else if (item.kind === 'mesh') { if (G) { clearFaceCache(); buildMeshes(); fitCamera(); } }
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
-  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY'].includes(item.k)) fitCamera(); if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
+  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'cameraOrtho', 'sideRevealX', 'sideRevealY'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
   if (item.k === 'manualHand') updateCursor();
 }
@@ -960,7 +1135,7 @@ function updateStatus() {
   if (!G) return;
   const left = G.tiles.filter(t => t.state !== 'gone').length;
   const free = G.tiles.filter(t => t.state === 'board' && isFree(t)).length;
-  $('#status').textContent = G.cleared ? `🎉 通关！共 ${G.tiles.length} 张牌` : `剩余 ${left}/${G.tiles.length} 张 · 可点击 ${free} 张 · 层数 ${BOUNDS.maxL + 1}`;
+  $('#status').textContent = (G.cleared ? '🎉 通关！' : '') + `剩余 ${left}/${G.tiles.length} 张 · 可点击 ${free} 张 · 层数 ${BOUNDS.maxL + 1} · 目标字母 ${G.letterCount}/${G.word.length}`;
 }
 let toastTimer = 0;
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2600); }
@@ -974,10 +1149,12 @@ $('#btnExport').onclick = () => {
   const blob = new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mahjong-settings.json'; a.click();
 };
+// 导入的 JSON 原样采用（不做旧默认值升级）
+function importJSON(txt) { S = { ...DEFAULTS, ...migrate(JSON.parse(txt), false) }; applyAll(); }
 $('#btnImport').onclick = () => $('#importFile').click();
 $('#importFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
-  f.text().then(txt => { try { S = { ...DEFAULTS, ...migrate(JSON.parse(txt)) }; applyAll(); toast('设置已导入'); } catch (err) { toast('导入失败：' + err.message); } });
+  f.text().then(txt => { try { importJSON(txt); toast('设置已导入'); } catch (err) { toast('导入失败：' + err.message); } });
   e.target.value = '';
 };
 $('#btnReset').onclick = () => { if (!confirm('确定恢复全部默认设置？')) return; S = { ...DEFAULTS }; applyAll(); toast('已恢复默认'); };
@@ -987,7 +1164,7 @@ function applyAll() { saveSettings(); syncPanel(); ['bgImage', 'logoImage', 'end
 window.__app = {
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
-  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree,
+  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree, importJSON,
 };
 
 buildPanel();

@@ -1,5 +1,5 @@
 // 程序化绘制牌面（全部 Canvas 绘制，无外部图片）
-const CJK = '"KaiTi","STKaiti","Kaiti SC","SimHei","Microsoft YaHei","PingFang SC","Noto Serif CJK SC","Noto Sans CJK SC",serif';
+const CJK = '"Microsoft YaHei","PingFang SC","Hiragino Sans GB","Noto Sans CJK SC","Source Han Sans SC","SimHei",sans-serif';
 const LAT = '"Arial Black","Helvetica Neue",Arial,"Noto Sans",sans-serif';
 const BLUE = '#1d4f9e', GREEN = '#1f8f3a', RED = '#d42a2a', NAVY = '#1c2a5e';
 
@@ -90,7 +90,7 @@ function drawBamboo(ctx, n, w, h) {
 const NUMS = ['一', '二', '三', '四', '伍', '六', '七', '八', '九'];
 function drawText(ctx, txt, w, h, col, font, size, yy = 0.54) {
   ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `bold ${size}px ${font}`;
+  ctx.font = `900 ${size}px ${font}`;
   ctx.fillText(txt, w / 2, h * yy);
 }
 function drawBird(ctx, w, h, body, accent) {

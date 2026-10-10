@@ -43,7 +43,7 @@ await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_pan
 // 托盘模式 + 3 张消除 + 改间隙/错位/层数 的快速逻辑测试
 const res = await page.evaluate(async () => {
   const out = [];
-  for (const cfg of [{ trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }]) {
+  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }]) {
     for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
     __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
     __app.newGame(true);
@@ -51,7 +51,7 @@ const res = await page.evaluate(async () => {
     const t0 = performance.now();
     __app.autoSolve();
     while (!__app.G.cleared && performance.now() - t0 < 120000) await new Promise(r => setTimeout(r, 200));
-    out.push({ cfg, tiles: n, cleared: __app.G.cleared, sec: ((performance.now() - t0) / 1000).toFixed(1) });
+    out.push({ cfg, tiles: n, cleared: __app.G.cleared, left: __app.G.tiles.filter(t => t.state !== 'gone').length, letters: __app.G.letterCount + '/' + __app.G.word.length, sec: ((performance.now() - t0) / 1000).toFixed(1) });
   }
   return out;
 });
@@ -73,6 +73,16 @@ await page.evaluate(() => { localStorage.clear(); });
 await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ seed: 5, handImage: 'data:image/svg+xml;charset=utf-8,%3Csvg%3E', manualHand: true })));
 await page.reload(); await page.waitForTimeout(800);
 console.log('old settings migrated', await page.evaluate(() => ({ handImage: __app.S.handImage, seed: __app.S.seed, ver: __app.S.settingsVersion })));
+// v2 设置：俯视倾角为旧默认 22 → 升级为 0（纯俯视）；用户自定义的 15 保留；导入 JSON 中的 22 原样保留
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 2, cameraTilt: 22, baseRatio: 0.6, seed: 9 })));
+await page.reload(); await page.waitForTimeout(800);
+const m1 = await page.evaluate(() => ({ tilt: __app.S.cameraTilt, ortho: __app.S.cameraOrtho, baseRatio: __app.S.baseRatio, seed: __app.S.seed }));
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 2, cameraTilt: 15 })));
+await page.reload(); await page.waitForTimeout(800);
+const m2 = await page.evaluate(() => __app.S.cameraTilt);
+const m3 = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 2, cameraTilt: 22, cameraOrtho: false })); return [__app.S.cameraTilt, __app.S.cameraOrtho]; });
+console.log('camera migration', { oldDefault22: m1, custom15: m2, imported: m3 });
+await page.evaluate(() => { localStorage.clear(); });
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);
