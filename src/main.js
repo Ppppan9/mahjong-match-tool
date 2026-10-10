@@ -4,7 +4,7 @@ import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -12,6 +12,8 @@ const OLD_DEFAULTS = {
   introDuration: [1.2], targetColorsCustom: [''], decoyLetters: ['TALXE'], letterColor: ['#1f9a3c'], flyDuration: [420],
   burstDuration: [650], particleColor: ['#3fae3a'], particleColor2: ['#a8e25a'], particleCount: [22], selectScale: [1.15],
 };
+// v3 的旧默认值（牌面构成/布局取景在 v4 调整）
+const OLD_DEFAULTS_V3 = { faceKinds: [20], offsetX: [0.5], boardScale: [0.88], boardOffsetY: [0.05] };
 let S = loadSettings();
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
@@ -19,6 +21,9 @@ function migrate(j, fromStorage = false) {
   if (typeof j.handImage !== 'string' || !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)) j.handImage = '';
   if (fromStorage && (j.settingsVersion || 1) < 3) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) < 4) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V3)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
   }
   delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;
@@ -186,13 +191,14 @@ function fitCamera() {
   const bw = b.maxx - b.minx, bh = (b.maxy - b.miny) * Math.cos(tilt) + zr * Math.sin(tilt);
   const aspect = VP.w / VP.h;
   const ty = cy + S.boardOffsetY * bh;
+  const tx = cx - (S.boardOffsetX || 0) * bw;
   if (S.cameraOrtho) {
     camera = orthoCam;
     const halfH = Math.max(bh / 2, bw / 2 / aspect) / S.boardScale;
     orthoCam.left = -halfH * aspect; orthoCam.right = halfH * aspect; orthoCam.top = halfH; orthoCam.bottom = -halfH;
     const d = 100;
-    orthoCam.position.set(cx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
-    orthoCam.up.set(0, 1, 0); orthoCam.lookAt(cx, ty, 0);
+    orthoCam.position.set(tx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
+    orthoCam.up.set(0, 1, 0); orthoCam.lookAt(tx, ty, 0);
     orthoCam.near = 1; orthoCam.far = d * 2 + 50;
     orthoCam.updateProjectionMatrix();
   } else {
@@ -200,8 +206,8 @@ function fitCamera() {
     perspCam.fov = S.cameraFov; perspCam.aspect = aspect;
     const t = Math.tan(S.cameraFov * Math.PI / 360);
     let d = Math.max((bh / 2) / t, (bw / 2) / (t * aspect)) / S.boardScale + zr;
-    perspCam.position.set(cx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
-    perspCam.up.set(0, 1, 0); perspCam.lookAt(cx, ty, 0);
+    perspCam.position.set(tx, ty - d * Math.sin(tilt), d * Math.cos(tilt));
+    perspCam.up.set(0, 1, 0); perspCam.lookAt(tx, ty, 0);
     perspCam.near = Math.max(0.1, d * 0.2); perspCam.far = d * 4;
     perspCam.updateProjectionMatrix();
   }
@@ -1028,7 +1034,7 @@ function onSetting(item, v) {
   if (item.kind === 'regen') scheduleRegen();
   else if (item.kind === 'mesh') { if (G) { clearFaceCache(); buildMeshes(); fitCamera(); } }
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
-  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'cameraOrtho', 'sideRevealX', 'sideRevealY'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
+  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
   if (item.k === 'manualHand') updateCursor();
 }

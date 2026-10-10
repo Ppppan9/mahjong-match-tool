@@ -1,5 +1,5 @@
 // 棋盘生成（保证有解）与求解器
-import { faceCatalog } from './faces.js';
+import { faceCatalog, decoyLetterKeys } from './faces.js';
 
 export function mulberry32(a) {
   return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
@@ -61,18 +61,31 @@ export function generateBoard(S) {
   }
   const n = pos.length;
   const coveredBy = coverOf();
-  // 牌面种类
-  const sets = faceCatalog(S).map(s => shuffle(s.slice(), rnd));
-  const kinds = [];
-  let si = 0;
-  const total = sets.reduce((a, s) => a + s.length, 0);
-  while (kinds.length < Math.min(S.faceKinds, total)) { const s = sets[si % sets.length]; if (s.length) kinds.push(s.shift()); si++; }
+  // 牌面种类：按类别权重交错分配（最先拆的组在最上层，所以顶层也保持参考视频的构成），同类内轮换，避免某一种牌面过多
+  const sets = faceCatalog(S).map(s => ({ keys: shuffle(s.keys.slice(), rnd), w: Math.max(0, s.w), n: 0, k: 0 })).filter(s => s.keys.length && s.w > 0);
+  if (!sets.length) sets.push({ keys: ['d1', 'd2', 'd3'], w: 1, n: 0, k: 0 });
+  const totalKinds = sets.reduce((a, s) => a + s.keys.length, 0);
+  if (S.faceKinds < totalKinds) { // 限制种类数：从种类多的类别里裁剪
+    let over = totalKinds - Math.max(sets.length, S.faceKinds);
+    while (over-- > 0) { const big = sets.reduce((a, b) => (b.keys.length > a.keys.length ? b : a)); if (big.keys.length > 1) big.keys.pop(); }
+  }
   const G = (n - L) / m;
   if (letterPairs && word.length > G) word = word.slice(0, G);
   const LG = letterPairs ? word.length : 0;
+  const decoys = decoyLetterKeys(S).slice(0, Math.max(0, G - LG - 1));
+  const wsum = sets.reduce((a, s) => a + s.w, 0);
   const keyList = [];
-  for (let g = 0; g < G - LG; g++) keyList.push(kinds[g % kinds.length]);
-  shuffle(keyList, rnd);
+  for (let g = 0; g < G - LG - decoys.length; g++) {
+    let best = sets[0], bd = -Infinity;
+    for (const st of sets) { const d = st.w / wsum * (g + 1) - st.n + rnd() * 0.3; if (d > bd) { bd = d; best = st; } }
+    best.n++;
+    if (best.k % best.keys.length === 0 && best.k) shuffle(best.keys, rnd);
+    keyList.push(best.keys[best.k++ % best.keys.length]);
+  }
+  // 小窗口内打乱，保持整体比例的同时去掉规律感
+  for (let i = 0; i < keyList.length; i += 6) { const w = shuffle(keyList.slice(i, i + 6), rnd); keyList.splice(i, w.length, ...w); }
+  // 干扰字母（如 T）与目标字母一样放在前段，使其出现在上层
+  for (const d of decoys) keyList.splice(Math.floor(rnd() * Math.max(1, (keyList.length + 1) * S.letterEarly)), 0, d);
   // 成对字母：按“靠前程度”插入到拆解顺序前段（越靠前越在上层、越早可见）
   for (let i = 0; i < LG; i++) {
     const pos2 = Math.floor(rnd() * Math.max(1, (keyList.length + 1) * S.letterEarly));
@@ -108,6 +121,8 @@ export function generateBoard(S) {
         ok = false; break;
       }
       shuffle(free, r2);
+      // 字母组（目标/干扰字母）优先取最高层，保证它们出现在第一眼可见的顶层（参考视频顶层约 1/4 是字母）
+      if (/^[TL]/.test(keyList[gi])) free.sort((a, b) => pos[b].layer - pos[a].layer);
       const grp = free.slice(0, m);
       for (const t of grp) { keys[t] = keyList[gi]; alive[t] = false; aliveCount--; }
       order.push(grp); gi++; step++;
