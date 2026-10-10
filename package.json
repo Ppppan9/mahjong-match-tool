@@ -1,0 +1,9 @@
+{
+  "name": "mahjong-match-tool",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "麻将消除小游戏网页工具（单文件离线版）",
+  "scripts": { "build": "node build.mjs", "test": "node test/run-test.mjs" },
+  "devDependencies": { "three": "0.160.0", "esbuild": "^0.25.0", "playwright-core": "^1.48.0" }
+}

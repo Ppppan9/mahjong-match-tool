@@ -1,0 +1,62 @@
+import { chromium } from 'playwright-core';
+import fs from 'fs';
+import path from 'path';
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const shots = path.join(root, 'screenshots');
+fs.mkdirSync(shots, { recursive: true });
+const mode = process.argv[2] || 'full';
+const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true,
+  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+const errors = [];
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); if (m.type() === 'warning') console.log('[warn]', m.text()); });
+page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+const requests = [];
+page.on('request', r => { if (!r.url().startsWith('file:') && !r.url().startsWith('data:') && !r.url().startsWith('blob:')) requests.push(r.url()); });
+await page.goto('file://' + path.join(root, 'index.html'));
+await page.waitForTimeout(600);
+await page.locator('#stage').screenshot({ path: path.join(shots, '01_initial_board.jpg') });
+const fps = await page.evaluate(() => new Promise(r => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(n / 2); }; requestAnimationFrame(f); }));
+console.log('headless fps', fps);
+const info = await page.evaluate(() => ({ tiles: __app.G.tiles.length, word: __app.G.word, free: __app.G.tiles.filter(t => __app.isFree(t)).length }));
+console.log('board', info);
+if (mode === 'quick') { console.log('errors', errors); await browser.close(); process.exit(0); }
+// 加速自动通关并自动录制
+await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); });
+const dlP = page.waitForEvent('download', { timeout: 400000 });
+await page.click('#btnAuto');
+await page.waitForTimeout(6000);
+await page.locator('#stage').screenshot({ path: path.join(shots, '02_mid_play_hand.jpg') });
+await page.waitForTimeout(1700);
+await page.locator('#stage').screenshot({ path: path.join(shots, '03_mid_play_2.jpg') });
+await page.waitForFunction(() => __app.G.wordDoneT > 0, null, { timeout: 240000 });
+await page.waitForTimeout(400);
+await page.locator('#stage').screenshot({ path: path.join(shots, '04_word_complete_glow.jpg') });
+await page.waitForFunction(() => __app.G.cleared, null, { timeout: 240000 });
+const dl = await dlP;
+const out = path.join(root, 'sample_recording' + path.extname(dl.suggestedFilename()));
+await dl.saveAs(out);
+console.log('recording', dl.suggestedFilename(), fs.statSync(out).size);
+await page.locator('#stage').screenshot({ path: path.join(shots, '05_end_card.jpg') });
+await page.screenshot({ path: path.join(shots, '06_full_ui_with_panel.jpg') });
+await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_panel.jpg') });
+// 托盘模式 + 3 张消除 + 改间隙/错位/层数 的快速逻辑测试
+const res = await page.evaluate(async () => {
+  const out = [];
+  for (const cfg of [{ trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }]) {
+    for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
+    __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
+    __app.newGame(true);
+    const n = __app.G.tiles.length;
+    const t0 = performance.now();
+    __app.autoSolve();
+    while (!__app.G.cleared && performance.now() - t0 < 120000) await new Promise(r => setTimeout(r, 200));
+    out.push({ cfg, tiles: n, cleared: __app.G.cleared, sec: ((performance.now() - t0) / 1000).toFixed(1) });
+  }
+  return out;
+});
+console.log(JSON.stringify(res, null, 1));
+await page.evaluate(() => { localStorage.clear(); });
+console.log('external requests', requests);
+console.log('errors', errors);
+await browser.close();
