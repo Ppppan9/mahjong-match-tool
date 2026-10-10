@@ -2,12 +2,19 @@ import * as THREE from 'three';
 import { DEFAULTS, SCHEMA } from './settings.js';
 import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
-import { DEFAULT_HAND_SVG } from './hand.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
+const SETTINGS_VERSION = 2;
 let S = loadSettings();
+// 旧版本设置迁移：v1 内置默认手指，v2 起未上传图片时不显示手指；只保留用户上传的图片数据
+function migrate(j) {
+  j = { ...j };
+  if (typeof j.handImage !== 'string' || !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)) j.handImage = '';
+  j.settingsVersion = SETTINGS_VERSION;
+  return j;
+}
 function loadSettings() {
-  try { const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); return { ...DEFAULTS, ...j }; } catch (e) { return { ...DEFAULTS }; }
+  try { const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); return { ...DEFAULTS, ...migrate(j) }; } catch (e) { return { ...DEFAULTS }; }
 }
 let saveTimer = 0;
 function saveSettings() {
@@ -40,12 +47,14 @@ const raycaster = new THREE.Raycaster();
 // ---------------- Images ----------------
 const IMG = {};
 function loadImg(key) {
-  const src = key === 'handImage' ? (S.handImage || 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(DEFAULT_HAND_SVG)) : S[key];
-  if (!src) { IMG[key] = null; return; }
+  const src = S[key];
+  if (!src) { IMG[key] = null; if (key === 'handImage') { drawHandPreview(); updateCursor(); } return; }
   const im = new Image();
-  im.onload = () => { IMG[key] = im; if (key === 'handImage') drawHandPreview(); };
+  im.onload = () => { if (S[key] !== src) return; IMG[key] = im; if (key === 'handImage') { drawHandPreview(); updateCursor(); } };
   im.src = src;
 }
+// 有上传手指且开启“手动时显示手指”时，隐藏系统光标，用手指图片当光标
+function updateCursor() { canvas.style.cursor = (IMG.handImage && S.manualHand) ? 'none' : 'pointer'; }
 ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg);
 
 // ---------------- Layout ----------------
@@ -846,6 +855,7 @@ function onSetting(item, v) {
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
   else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY'].includes(item.k)) fitCamera(); if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
+  if (item.k === 'manualHand') updateCursor();
 }
 function fmt(v, step) { return step && step < 1 ? (+v).toFixed(String(step).split('.')[1].length) : v; }
 function buildPanel() {
@@ -883,7 +893,7 @@ function buildPanel() {
       } else if (it.type === 'file') {
         el = document.createElement('input'); el.type = 'file'; el.accept = 'image/*';
         el.onchange = () => { const f = el.files[0]; if (!f) return; const fr = new FileReader(); fr.onload = () => onSetting(it, fr.result); fr.readAsDataURL(f); };
-        const clr = document.createElement('button'); clr.textContent = '清除'; clr.onclick = () => { el.value = ''; onSetting(it, ''); };
+        const clr = document.createElement('button'); clr.textContent = it.k === 'handImage' ? '清除已上传手指' : '清除'; if (it.k === 'handImage') clr.id = 'btnClearHand'; clr.onclick = () => { el.value = ''; onSetting(it, ''); };
         row.appendChild(el); row.appendChild(clr);
       }
       row.classList.add('t-' + it.type);
@@ -912,9 +922,14 @@ function handPrevBox() {
   return { x: (hp.width - im.width * k) / 2, y: (hp.height - im.height * k) / 2, w: im.width * k, h: im.height * k };
 }
 function drawHandPreview() {
-  const hp = $('#handPrev'); if (!hp || !IMG.handImage) return;
+  const hp = $('#handPrev'); if (!hp) return;
   const c = hp.getContext('2d'); c.clearRect(0, 0, hp.width, hp.height);
   c.fillStyle = '#333'; c.fillRect(0, 0, hp.width, hp.height);
+  if (!IMG.handImage) {
+    c.fillStyle = '#999'; c.font = '13px sans-serif'; c.textAlign = 'center';
+    c.fillText('未上传手指图片', hp.width / 2, hp.height / 2 - 10); c.fillText('（不显示手指，', hp.width / 2, hp.height / 2 + 10); c.fillText('仅显示点击波纹）', hp.width / 2, hp.height / 2 + 28);
+    return;
+  }
   const b = handPrevBox(); c.drawImage(IMG.handImage, b.x, b.y, b.w, b.h);
   const x = b.x + S.handAnchorX * b.w, y = b.y + S.handAnchorY * b.h;
   c.strokeStyle = '#0f0'; c.lineWidth = 2; c.beginPath(); c.moveTo(x - 8, y); c.lineTo(x + 8, y); c.moveTo(x, y - 8); c.lineTo(x, y + 8); c.stroke();
@@ -962,7 +977,7 @@ $('#btnExport').onclick = () => {
 $('#btnImport').onclick = () => $('#importFile').click();
 $('#importFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
-  f.text().then(txt => { try { S = { ...DEFAULTS, ...JSON.parse(txt) }; applyAll(); toast('设置已导入'); } catch (err) { toast('导入失败：' + err.message); } });
+  f.text().then(txt => { try { S = { ...DEFAULTS, ...migrate(JSON.parse(txt)) }; applyAll(); toast('设置已导入'); } catch (err) { toast('导入失败：' + err.message); } });
   e.target.value = '';
 };
 $('#btnReset').onclick = () => { if (!confirm('确定恢复全部默认设置？')) return; S = { ...DEFAULTS }; applyAll(); toast('已恢复默认'); };
@@ -976,6 +991,7 @@ window.__app = {
 };
 
 buildPanel();
+drawHandPreview();
 setResolution();
 resetHand();
 newGame(true);

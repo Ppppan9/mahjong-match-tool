@@ -97,6 +97,7 @@ export const DEFAULTS = {
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
+  settingsVersion: 2,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -226,13 +227,13 @@ export const SCHEMA = [
     R('handAnchorY', '指尖锚点 Y(0~1)', 0, 1, 0.005),
     R('handRotation', '手指旋转(度)', -60, 60, 1),
     B('handFlip', '手指水平翻转'),
-    F('handImage', '上传手指图片(透明PNG)'),
+    F('handImage', '上传手指图片(透明PNG，不上传则不显示手指)'),
     R('pressDepth', '按压幅度', 0, 0.3, 0.01),
     C('rippleColor', '点击波纹颜色'),
     R('rippleSize', '波纹大小', 0.02, 0.3, 0.005),
     R('rippleWidth', '波纹线宽', 1, 16, 0.5),
     R('rippleDuration', '波纹时长(ms)', 100, 1500, 10),
-    B('manualHand', '手动游玩时显示手指'),
+    B('manualHand', '手动游玩时手指跟随鼠标(需上传手指)'),
   ]},
   { group: '录制', open: true, items: [
     S('recRes', '输出分辨率', [['360x640', '360×640'], ['540x960', '540×960'], ['720x1280', '720×1280'], ['1080x1920', '1080×1920']], { kind: 'res' }),

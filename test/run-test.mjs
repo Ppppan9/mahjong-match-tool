@@ -26,7 +26,7 @@ await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting
 const dlP = page.waitForEvent('download', { timeout: 400000 });
 await page.click('#btnAuto');
 await page.waitForTimeout(6000);
-await page.locator('#stage').screenshot({ path: path.join(shots, '02_mid_play_hand.jpg') });
+await page.locator('#stage').screenshot({ path: path.join(shots, '02_mid_play_no_hand.jpg') });
 await page.waitForTimeout(1700);
 await page.locator('#stage').screenshot({ path: path.join(shots, '03_mid_play_2.jpg') });
 await page.waitForFunction(() => __app.G.wordDoneT > 0, null, { timeout: 240000 });
@@ -56,6 +56,23 @@ const res = await page.evaluate(async () => {
   return out;
 });
 console.log(JSON.stringify(res, null, 1));
+// 上传手指 PNG：作为光标使用；清除后不再显示
+const handRes = await page.evaluate(async () => {
+  const c = document.createElement('canvas'); c.width = 120; c.height = 200; const g = c.getContext('2d');
+  g.fillStyle = '#f5d0b8'; g.beginPath(); g.roundRect(40, 10, 40, 120, 20); g.fill(); g.fillRect(20, 110, 90, 90); g.fillStyle = '#d0142c'; g.beginPath(); g.roundRect(46, 14, 28, 30, 12); g.fill();
+  __app.setSetting('handImage', c.toDataURL('image/png'));
+  await new Promise(r => setTimeout(r, 300));
+  const withHand = document.querySelector('#stage').style.cursor;
+  document.querySelector('#btnClearHand').click();
+  await new Promise(r => setTimeout(r, 200));
+  return { cursorWithHand: withHand, afterClear: __app.S.handImage === '', cursorAfterClear: document.querySelector('#stage').style.cursor };
+});
+console.log('hand upload/clear', handRes);
+await page.evaluate(() => { localStorage.clear(); });
+// 旧版本 localStorage（v1，无 settingsVersion，handImage 为空或为 SVG 默认手）不应带回默认手指
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ seed: 5, handImage: 'data:image/svg+xml;charset=utf-8,%3Csvg%3E', manualHand: true })));
+await page.reload(); await page.waitForTimeout(800);
+console.log('old settings migrated', await page.evaluate(() => ({ handImage: __app.S.handImage, seed: __app.S.seed, ver: __app.S.settingsVersion })));
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);
