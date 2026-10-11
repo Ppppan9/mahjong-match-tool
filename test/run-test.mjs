@@ -21,9 +21,10 @@ console.log('headless fps', fps);
 const info = await page.evaluate(() => ({ tiles: __app.G.tiles.length, word: __app.G.word, free: __app.G.tiles.filter(t => __app.isFree(t)).length }));
 console.log('board', info);
 if (mode === 'quick') { console.log('errors', errors); await browser.close(); process.exit(0); }
-// 加速自动通关并自动录制
+// 加速自动通关；自动通关默认不再自动录制（v14.1）→ 先点「开始录制」，通关后自动停止并下载
 await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); });
 const dlP = page.waitForEvent('download', { timeout: 400000 });
+await page.click('#btnRec');
 await page.click('#btnAuto');
 await page.waitForTimeout(6000);
 await page.locator('#stage').screenshot({ path: path.join(shots, '02_mid_play_no_hand.jpg') });

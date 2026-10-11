@@ -11,7 +11,8 @@
     "test:logic": "esbuild test/logic-test.mjs --bundle --platform=node --format=esm --loader:.woff=dataurl --loader:.ttf=dataurl --log-level=warning --outfile=/tmp/mj-logic.mjs && node /tmp/mj-logic.mjs && esbuild test/repair-test.mjs --bundle --platform=node --format=esm --loader:.woff=dataurl --loader:.ttf=dataurl --log-level=warning --outfile=/tmp/mj-repair.mjs && node /tmp/mj-repair.mjs",
     "test:theme": "node test/theme-test.mjs && node test/theme-shot.mjs",
     "test:ae:mideast": "AE_THEME=mideast AE_SUFFIX=_mideast AE_OUT=/tmp/aeexp_me node test/ae-export.mjs && node test/ae-mock.mjs samples/ae_export_sample_mideast.zip samples/ae_export_manual_mideast.zip && CHECK_OUT=screenshots/ae_export_check_mideast.jpg node test/ae-composite.mjs samples/ae_export_sample_mideast.zip /tmp/aeexp_me/snapsA",
-    "test:tap": "node test/tap-press.mjs"
+    "test:tap": "node test/tap-press.mjs",
+    "test:norec": "node test/no-auto-rec.mjs"
   },
   "devDependencies": {
     "acorn": "^8.19.0",

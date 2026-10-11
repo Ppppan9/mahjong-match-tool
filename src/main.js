@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 13;
+const SETTINGS_VERSION = 14;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -90,6 +90,8 @@ function migrate(j, fromStorage = false) {
       for (const [k, v] of Object.entries({ tapRipple: true, selectBorder: true, pressEnabled: false })) if (!(k in j)) j[k] = v;
     }
   }
+  // v14：自动通关默认不再自动开始录制。本地旧存档里的 autoRec 一直是旧默认值 true → 改为 false；导入的 JSON 保留其值
+  if (fromStorage && (j.settingsVersion || 1) < 14 && j.autoRec === true) j.autoRec = false;
   // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）
   if (!j.theme || !THEMES[j.theme]) j.theme = 'guofeng';
   if (!j.themeStore || typeof j.themeStore !== 'object' || Array.isArray(j.themeStore)) j.themeStore = {};
@@ -930,7 +932,8 @@ function onCleared() {
   G.cleared = true; G.clearT = performance.now();
   if (S.endCard) { const gid = G; setTimeout(() => { if (G === gid) sfx('End'); }, S.endDelay); }
   updateStatus();
-  if (REC.rec && S.autoStop && REC.auto) {
+  // 只在已有录制时生效：自动通关开启的录制，或用户手动开始录制后在自动通关中通关
+  if (REC.rec && S.autoStop && (REC.auto || AUTO.running)) {
     const wait = (S.endCard ? S.endDelay + 2600 / Math.max(0.5, S.autoSpeed) : 600) + S.tailSec * 1000;
     const recRef = REC.rec;
     setTimeout(() => { if (REC.rec === recRef) stopRecording(); }, wait);

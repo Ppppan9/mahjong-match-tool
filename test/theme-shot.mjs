@@ -138,7 +138,7 @@ const mig = await p.evaluate(async () => {
 await p.waitForTimeout(600); await p.reload(); await p.waitForTimeout(1500);
 mig.afterReload = await p.evaluate(() => ({ theme: __app.theme, pc: __app.S.particleColor, top: __app.S.topBarColor }));
 console.log('migration', JSON.stringify(mig));
-const ok = mig.theme === 'guofeng' && mig.v === 12 && mig.top === '#123456' && mig.layers === 4 && mig.pc === '#00ff00' && mig.meTop === '#3a1d0c' && mig.meLayers === 4 && mig.meSpeed === 1.7 && mig.backTop === '#123456' && mig.backPc === '#00ff00' && mig.mePcKept === '#abcdef' && mig.afterReload.theme === 'mideast' && mig.afterReload.pc === '#abcdef';
+const ok = mig.theme === 'guofeng' && mig.v === 14 && mig.top === '#123456' && mig.layers === 4 && mig.pc === '#00ff00' && mig.meTop === '#3a1d0c' && mig.meLayers === 4 && mig.meSpeed === 1.7 && mig.backTop === '#123456' && mig.backPc === '#00ff00' && mig.mePcKept === '#abcdef' && mig.afterReload.theme === 'mideast' && mig.afterReload.pc === '#abcdef';
 console.log('migration ok', ok);
 await browser.close();
 console.log('external requests', requests.length, 'errors', errors);

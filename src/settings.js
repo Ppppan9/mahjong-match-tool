@@ -180,13 +180,13 @@ export const DEFAULTS = {
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
-  settingsVersion: 13,
+  settingsVersion: 14,
   // 录制
   recRes: '720x1280',
   recFps: 30,
   recFormat: 'auto',
   recBitrate: 8,
-  autoRec: true,
+  autoRec: false, // v14.1：自动通关默认不再自动开始录制（录制只由「开始录制」按钮 / AE「开始记录」开始）
   autoStop: true,
   tailSec: 2.5,
   // 导出 AE 工程
@@ -429,8 +429,8 @@ export const SCHEMA = [
     S('recFps', '帧率', [[24, '24'], [30, '30'], [60, '60']], { num: true }),
     S('recFormat', '格式', [['auto', '自动(优先 MP4)'], ['mp4', 'MP4'], ['webm', 'WebM']]),
     R('recBitrate', '码率(Mbps)', 1, 30, 0.5),
-    B('autoRec', '自动通关开始时自动录制'),
-    B('autoStop', '通关后自动停止并下载'),
+    B('autoRec', '自动通关开始时自动录制（默认关）'),
+    B('autoStop', '自动通关通关后停止录制并下载（仅在正在录制时）'),
     R('tailSec', '通关后继续录制(秒)', 0, 10, 0.1),
   ]},
   { group: '导出 AE 工程', open: true, items: [
