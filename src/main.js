@@ -4,7 +4,7 @@ import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 6;
+const SETTINGS_VERSION = 7;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -16,6 +16,8 @@ const OLD_DEFAULTS = {
 const OLD_DEFAULTS_V3 = { faceKinds: [20], offsetX: [0.5], boardScale: [0.88], boardOffsetY: [0.05] };
 // v4 的旧默认值（配对飞行在 v5 改为飞向画面固定汇合点）
 const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDuration: [220] };
+// v6 默认（居中金字塔、较小的牌）；v7 起默认改回参考视频的同尺寸居中堆叠与取景
+const OLD_DEFAULTS_V6 = { insetX: [0.5], insetY: [0.5], boardScale: [0.86], boardOffsetY: [0.068], tileRatio: [1.18], gapY: [0.04] };
 const LEGACY_STACK = { offsetX: 0.08, offsetY: 0, shrinkCols: 0, shrinkRows: 0 };
 let S = loadSettings();
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
@@ -36,6 +38,9 @@ function migrate(j, fromStorage = false) {
     const custom = ['offsetX', 'offsetY', 'shrinkCols', 'shrinkRows'].some(k => k in j && String(j[k]) !== String(LEGACY_STACK[k])) || ('altOffset' in j && j.altOffset === false);
     if (custom || (!fromStorage && 'offsetX' in j)) j.stackMode = 'offset';
     else if (fromStorage && String(j.boardOffsetX) === '0.005') delete j.boardOffsetX;
+  }
+  if (fromStorage && (j.settingsVersion || 1) < 7) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V6)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
   }
   delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;

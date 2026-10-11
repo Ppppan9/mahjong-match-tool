@@ -98,6 +98,16 @@ console.log('v5->v6 stack migration', {
   importedOld: await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 5, offsetX: 0.08 })); return __app.S.stackMode; }),
   importedNew: await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 6, stackMode: 'centered', insetX: 1 })); return [__app.S.stackMode, __app.S.insetX]; }),
 });
+await page.waitForTimeout(500);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 6, stackMode: 'centered', insetX: 0.5, insetY: 0.5, boardScale: 0.86, boardOffsetY: 0.068, tileRatio: 1.18, gapY: 0.04 })));
+await page.reload(); await page.waitForTimeout(800);
+const v7a = await page.evaluate(() => [__app.S.insetX, __app.S.insetY, __app.S.boardScale, __app.S.boardOffsetY, __app.S.tileRatio, __app.S.gapY, __app.S.settingsVersion]);
+await page.waitForTimeout(500);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 6, insetX: 1, boardScale: 0.7 })));
+await page.reload(); await page.waitForTimeout(800);
+const v7b = await page.evaluate(() => [__app.S.insetX, __app.S.boardScale]);
+const v7c = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 6, stackMode: 'centered', insetX: 0.5, insetY: 0.5, boardScale: 0.86 })); return [__app.S.insetX, __app.S.insetY, __app.S.boardScale]; });
+console.log('v6->v7 migration', { oldDefaults: v7a, custom: v7b, imported: v7c });
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);
