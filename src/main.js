@@ -4,7 +4,7 @@ import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 5;
+const SETTINGS_VERSION = 6;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -16,6 +16,7 @@ const OLD_DEFAULTS = {
 const OLD_DEFAULTS_V3 = { faceKinds: [20], offsetX: [0.5], boardScale: [0.88], boardOffsetY: [0.05] };
 // v4 的旧默认值（配对飞行在 v5 改为飞向画面固定汇合点）
 const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDuration: [220] };
+const LEGACY_STACK = { offsetX: 0.08, offsetY: 0, shrinkCols: 0, shrinkRows: 0 };
 let S = loadSettings();
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
@@ -29,6 +30,12 @@ function migrate(j, fromStorage = false) {
   }
   if (fromStorage && (j.settingsVersion || 1) < 4) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V3)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
+  }
+  if ((j.settingsVersion || 1) < 6 && !('stackMode' in j)) {
+    // v6 起默认“居中金字塔”堆叠。旧存档若自定义过单向错位/层数递减，或是导入的旧版 JSON（含错位参数），保持旧版单向错位以原样还原
+    const custom = ['offsetX', 'offsetY', 'shrinkCols', 'shrinkRows'].some(k => k in j && String(j[k]) !== String(LEGACY_STACK[k])) || ('altOffset' in j && j.altOffset === false);
+    if (custom || (!fromStorage && 'offsetX' in j)) j.stackMode = 'offset';
+    else if (fromStorage && String(j.boardOffsetX) === '0.005') delete j.boardOffsetX;
   }
   delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;
@@ -168,7 +175,15 @@ function shearK() {
   const th = Math.max(0.01, S.tileThick), tw = G ? G.tw : 1;
   return { kx: S.sideRevealX * tw / th, ky: S.sideRevealY * tw / th };
 }
+// 居中模式下抵消 2.5D 侧面剪切带来的“每层向左上偏移”，让各层牌面在屏幕上真正以同一中心堆叠
+function layerComp(L) {
+  if (S.stackMode === 'offset' || !S.revealCompensate) return { x: 0, y: 0 };
+  const { kx, ky } = shearK(), z = L * S.tileThick;
+  return { x: kx * z, y: -ky * z };
+}
+const wX = t => t.x + layerComp(t.layer).x, wY = t => t.y + layerComp(t.layer).y;
 function applyShear() {
+  if (G) for (const t of G.tiles) if (t.obj) t.obj.position.set(wX(t), wY(t), t.layer * S.tileThick);
   const { kx, ky } = shearK();
   boardGroup.matrixAutoUpdate = false;
   boardGroup.matrix.set(1, 0, -kx, 0, 0, 1, ky, 0, 0, 0, 1, 0, 0, 0, 0, 1);
@@ -182,7 +197,7 @@ function shearedBounds() {
   const { kx, ky } = shearK();
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
   for (const t of G.tiles) for (const z of [t.layer * S.tileThick, (t.layer + 1) * S.tileThick]) {
-    const x = t.x - kx * z, y = t.y + ky * z;
+    const x = wX(t) - kx * z, y = wY(t) + ky * z;
     minx = Math.min(minx, x - G.tw / 2); maxx = Math.max(maxx, x + G.tw / 2); miny = Math.min(miny, y - G.th / 2); maxy = Math.max(maxy, y + G.th / 2);
   }
   return { minx, maxx, miny, maxy };
@@ -254,7 +269,7 @@ function buildMeshes() {
   const shGeo = new THREE.PlaneGeometry(tw * 1.32, th * 1.28);
   for (const t of G.tiles) {
     const g = new THREE.Group();
-    g.position.set(t.x, t.y, t.layer * thick);
+    g.position.set(wX(t), wY(t), t.layer * thick);
     const base = new THREE.Mesh(baseGeo, new THREE.MeshLambertMaterial({ color: S.baseColor }));
     const slab = new THREE.Mesh(slabGeo, new THREE.MeshLambertMaterial({ color: S.sideColor }));
     const face = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ map: faceTexture(t.key), alphaTest: 0.5 }));
@@ -297,7 +312,8 @@ function project(x, y, z) {
 }
 function tileScreen(t) {
   const z = (t.layer + 1) * S.tileThick;
-  const c = project(t.x, t.y, z), r = project(t.x + G.tw / 2, t.y, z), u = project(t.x, t.y + G.th / 2, z);
+  const x = wX(t), y = wY(t);
+  const c = project(x, y, z), r = project(x + G.tw / 2, y, z), u = project(x, y + G.th / 2, z);
   return { x: c.x, y: c.y, w: Math.abs(r.x - c.x) * 2, h: Math.abs(u.y - c.y) * 2 };
 }
 function slotRect(i) {

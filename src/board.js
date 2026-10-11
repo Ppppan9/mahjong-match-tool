@@ -13,6 +13,16 @@ export function layerGrids(S) {
     if (g.length) return g.slice(0, 12);
   }
   const out = [];
+  if (S.stackMode !== 'offset') { // 居中金字塔：每往上一层每侧缩进 inset 张牌
+    const N = Math.max(1, S.layers), dc = Math.round(2 * S.insetX), dr = Math.round(2 * S.insetY);
+    for (let i = 0; i < N; i++) {
+      const k = S.stackGridRef === 'base' ? -i : N - 1 - i; // 'top'：列/行数指顶层，下层逐层变大
+      const c = S.baseCols + k * dc, r = S.baseRows + k * dr;
+      if (c < 1 || r < 1) break;
+      out.push([c, r]);
+    }
+    return out;
+  }
   for (let i = 0; i < S.layers; i++) {
     const c = S.baseCols - i * S.shrinkCols, r = S.baseRows - i * S.shrinkRows;
     if (c < 1 || r < 1) break;
@@ -28,13 +38,25 @@ export function generateBoard(S) {
   const grids = layerGrids(S);
   const c0 = grids[0][0], r0 = grids[0][1];
   let pos = [];
+  const centered = S.stackMode !== 'offset';
+  const NL = grids.length;
   grids.forEach(([cols, rows], L) => {
-    const k = S.altOffset ? (L % 2) : L;
-    const ox = -(c0 - 1) / 2 * px + k * S.offsetX * px;
-    const oy = (r0 - 1) / 2 * py - k * S.offsetY * py; // y 向上为正，行从上往下
+    let ox, oy, st;
+    if (centered) {
+      // 每层各自以原点居中；砖块错位按 ±stagger/2 对称分配，层间微调按中间层对称（整体重心不偏）
+      const m = L - (NL - 1) / 2;
+      ox = -(cols - 1) / 2 * px + m * (S.stackNudgeX || 0) * px;
+      oy = (rows - 1) / 2 * py - m * (S.stackNudgeY || 0) * py;
+      st = r => ((r % 2) - (rows > 1 ? 0.5 : 0)) * (S.rowStagger || 0) * px;
+    } else { // 旧版：所有层以底层为基准，按层单向错位
+      const k = S.altOffset ? (L % 2) : L;
+      ox = -(c0 - 1) / 2 * px + k * S.offsetX * px;
+      oy = (r0 - 1) / 2 * py - k * S.offsetY * py; // y 向上为正，行从上往下
+      st = r => (r % 2) * (S.rowStagger || 0) * px;
+    }
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       if (L > 0 && S.holeRate > 0 && rnd() < S.holeRate) continue;
-      pos.push({ layer: L, col: c, row: r, x: ox + c * px + (r % 2) * (S.rowStagger || 0) * px, y: oy - r * py });
+      pos.push({ layer: L, col: c, row: r, x: ox + c * px + st(r), y: oy - r * py });
     }
   });
   const overlap = (a, b) => Math.abs(a.x - b.x) < tw * 0.97 && Math.abs(a.y - b.y) < th * 0.97;
@@ -56,7 +78,8 @@ export function generateBoard(S) {
     if (pos.length - L < m) { if (!letterPairs) { word = word.slice(0, Math.max(0, pos.length % m)); L = word.length; } if ((pos.length - L) % m === 0 && pos.length - L >= m) break; if (pos.length < m) break; }
     const cov = pos.map((p, i) => pos.some((q, j) => j !== i && q.layer < p.layer && overlap(p, q)) || p.layer === 0);
     const tops = pos.map((p, i) => i).filter(i => !pos.some((q, j) => q.layer > pos[i].layer && overlap(pos[i], q)));
-    tops.sort((a, b) => pos[b].layer - pos[a].layer || rnd() - 0.5);
+    if (S.stackMode !== 'offset') tops.sort((a, b) => pos[a].layer - pos[b].layer || Math.abs(pos[a].x) - Math.abs(pos[b].x) || pos[a].y - pos[b].y); // 居中模式：从最底层露出边缘的正中删（顶层保持完整、左右对称）
+    else tops.sort((a, b) => pos[b].layer - pos[a].layer || rnd() - 0.5);
     pos.splice(tops[0], 1);
   }
   const n = pos.length;

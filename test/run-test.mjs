@@ -43,7 +43,8 @@ await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_pan
 // 托盘模式 + 3 张消除 + 改间隙/错位/层数 的快速逻辑测试
 const res = await page.evaluate(async () => {
   const out = [];
-  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }]) {
+  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }]) {
+    __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'top';
     for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
     __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
     __app.newGame(true);
@@ -82,12 +83,21 @@ await page.reload(); await page.waitForTimeout(800);
 const m2 = await page.evaluate(() => __app.S.cameraTilt);
 const m3 = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 2, cameraTilt: 22, cameraOrtho: false })); return [__app.S.cameraTilt, __app.S.cameraOrtho]; });
 console.log('camera migration', { oldDefault22: m1, custom15: m2, imported: m3 });
+await page.waitForTimeout(500); // 等上一步导入的延迟保存落盘，避免覆盖下面写入的旧存档
 await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 3, offsetX: 0.5, faceKinds: 20, boardScale: 0.9 })));
 await page.reload(); await page.waitForTimeout(800);
 console.log('v3->v4 migration', await page.evaluate(() => ({ offsetX: __app.S.offsetX, faceKinds: __app.S.faceKinds, customBoardScale: __app.S.boardScale, ver: __app.S.settingsVersion })));
 await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 4, flyScale: 1.25, flyDuration: 1100, letterFlyDuration: 220, burstDuration: 900 })));
 await page.reload(); await page.waitForTimeout(800);
 console.log('v4->v5 migration', await page.evaluate(() => ({ flyScale: __app.S.flyScale, flyDuration: __app.S.flyDuration, letterFly: __app.S.letterFlyDuration, customBurst: __app.S.burstDuration, meetMode: __app.S.meetMode, ver: __app.S.settingsVersion })));
+await page.evaluate(() => { localStorage.clear(); });
+const st = async (j) => { await page.waitForTimeout(500); await page.evaluate(j => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify(j)), j); await page.reload(); await page.waitForTimeout(800); return page.evaluate(() => [__app.S.stackMode, __app.S.offsetX, __app.S.boardOffsetX]); };
+console.log('v5->v6 stack migration', {
+  oldDefaults: await st({ settingsVersion: 5, offsetX: 0.08, boardOffsetX: 0.005, layers: 3 }),
+  customOffset: await st({ settingsVersion: 5, offsetX: 0.3, boardOffsetX: 0.005 }),
+  importedOld: await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 5, offsetX: 0.08 })); return __app.S.stackMode; }),
+  importedNew: await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 6, stackMode: 'centered', insetX: 1 })); return [__app.S.stackMode, __app.S.insetX]; }),
+});
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);
