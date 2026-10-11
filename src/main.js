@@ -6,7 +6,7 @@ import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from '
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 9;
+const SETTINGS_VERSION = 10;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -21,6 +21,7 @@ const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDurati
 // v6 默认（居中金字塔、较小的牌）；v7 起默认改回参考视频的同尺寸居中堆叠与取景
 const OLD_DEFAULTS_V6 = { insetX: [0.5], insetY: [0.5], boardScale: [0.86], boardOffsetY: [0.068], tileRatio: [1.18], gapY: [0.04] };
 // v7 默认（牌身细节/字色/顶栏在 v8 按参考视频逐像素校准）
+const OLD_DEFAULTS_V9 = { insetX: [0], shadowStrength: [0.5], shadowDX: [-0.07], shadowDY: [0.03] };
 const OLD_DEFAULTS_V7 = {
   baseRatio: [0.4], cornerRadius: [0.1], sideColor: ['#deded4'], baseColor: ['#3aa655'], sideRevealX: [0.035], sideRevealY: [0.09],
   targetColorsCustom: ['#1d3f7a,#c62828,#1d4f9e,#2e9a3e,#2e9a3e'], letterColor: ['#c62828'], bgColor: ['#0a0503'], topBarColor: ['#6a2a14'],
@@ -58,6 +59,9 @@ function migrate(j, fromStorage = false) {
   }
   if (fromStorage && (j.settingsVersion || 1) < 8) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V7)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) === 9) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V9)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
   }
   if (fromStorage && (j.settingsVersion || 1) < 9 && Object.keys(j).length > 1) {
     const changed = V9_RESET_KEYS.filter(k => k in j && String(j[k]) !== String(DEFAULTS[k]));
@@ -206,10 +210,12 @@ function shearK() {
   return { kx: S.sideRevealX * tw / th, ky: S.sideRevealY * tw / th };
 }
 // 居中模式下抵消 2.5D 侧面剪切带来的“每层向左上偏移”，让各层牌面在屏幕上真正以同一中心堆叠
+// v10：不再把层间错位完全抵消（那样各层牌面完全重合，看不出哪张在第几层）。参考视频里每低一层，
+// 牌面在屏幕上向右下错开约 0.045 / 0.075 牌宽。以最高层为基准（最高层位置不变，取景/居中不受影响）。
 function layerComp(L) {
   if (S.stackMode === 'offset' || !S.revealCompensate) return { x: 0, y: 0 };
-  const { kx, ky } = shearK(), z = L * S.tileThick;
-  return { x: kx * z, y: -ky * z };
+  const tw = G ? G.tw : 1, d = L - (BOUNDS ? BOUNDS.maxL : 0);
+  return { x: d * tw * (S.sideRevealX - (S.layerOffsetX || 0)), y: -d * tw * (S.sideRevealY - (S.layerOffsetY || 0)) };
 }
 const wX = t => t.x + layerComp(t.layer).x, wY = t => t.y + layerComp(t.layer).y;
 function applyShear() {
@@ -223,10 +229,10 @@ function computeBounds() {
   let maxL = 0; for (const t of G.tiles) maxL = Math.max(maxL, t.layer);
   BOUNDS = { maxL };
 }
-function shearedBounds() {
+function shearedBounds(topOnly = false) {
   const { kx, ky } = shearK();
   let minx = 1e9, maxx = -1e9, miny = 1e9, maxy = -1e9;
-  for (const t of G.tiles) for (const z of [t.layer * S.tileThick, (t.layer + 1) * S.tileThick]) {
+  for (const t of G.tiles) if (!topOnly || t.layer === BOUNDS.maxL) for (const z of [t.layer * S.tileThick, (t.layer + 1) * S.tileThick]) {
     const x = wX(t) - kx * z, y = wY(t) + ky * z;
     minx = Math.min(minx, x - G.tw / 2); maxx = Math.max(maxx, x + G.tw / 2); miny = Math.min(miny, y - G.th / 2); maxy = Math.max(maxy, y + G.th / 2);
   }
@@ -239,7 +245,9 @@ function topFaceBounds() {
 }
 function fitCamera() {
   if (!BOUNDS || !G) return;
-  const b = shearedBounds();
+  // 取景以最高层（牌面+侧面）为准，下层只是在其下方露出一点时不改变顶层的取景；下层明显更大（金字塔）时用全部
+  const ball = shearedBounds(), btop = shearedBounds(true), tw = G.tw;
+  const b = S.centerOn !== 'all' && ball.minx > btop.minx - 0.3 * tw && ball.maxx < btop.maxx + 0.3 * tw && ball.miny > btop.miny - 0.3 * tw && ball.maxy < btop.maxy + 0.3 * tw ? btop : ball;
   let cx = (b.minx + b.maxx) / 2; const cy = (b.miny + b.maxy) / 2;
   // 水平居中：默认以“最高层牌面”在屏幕上的实际范围居中（不含向右露出的侧面/底座），保证顶层严格位于画面正中
   if (S.centerOn !== 'all') { const tb = topFaceBounds(); if (tb) cx = (tb.minx + tb.maxx) / 2; }
@@ -273,11 +281,12 @@ function fitCamera() {
 
 let shadowTex = null;
 function makeShadowTex() {
+  // 上层牌投到下层牌面上的柔和阴影（同层邻牌牌面更高，会挡住它；所以只在下层牌上看得见）
   const c = document.createElement('canvas'); c.width = 128; c.height = Math.round(128 * S.tileRatio * 1.0);
   const g = c.getContext('2d');
-  g.filter = 'blur(7px)';
+  g.filter = 'blur(9px)';
   g.fillStyle = '#000';
-  rr(g, 16, 16, c.width - 32, c.height - 32, 14); g.fill();
+  rr(g, 20, 20, c.width - 40, c.height - 40, 14); g.fill();
   const t = new THREE.CanvasTexture(c); return t;
 }
 let leftShadowTex = null;
@@ -331,7 +340,7 @@ function buildMeshes() {
     for (let i = 0; i < pos.count; i++) { c.setStyle(sideGrad(1 - pos.getZ(i) / thick)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
     bodyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
   const faceGeo = new THREE.PlaneGeometry(tw * 0.995, th * 0.995); faceGeo.translate(0, 0, thick + 0.003);
-  const shGeo = new THREE.PlaneGeometry(tw * 1.32, th * 1.28);
+  const shGeo = new THREE.PlaneGeometry(tw * 1.42, th * 1.36);
   // 向左投在相邻牌面上的柔和阴影（参考视频每张牌左侧邻牌的右缘都有一条渐暗带）
   const lsw = Math.max(0.001, S.leftShadowWidth) * tw;
   const lsGeo = new THREE.PlaneGeometry(lsw, th * 0.97); lsGeo.translate(-tw * 0.4975 - lsw / 2 + tw * 0.01, 0, thick + 0.006);
@@ -349,7 +358,7 @@ function buildMeshes() {
       const ls = new THREE.Mesh(lsGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: leftShadowTex, transparent: true, opacity: S.leftShadow, depthWrite: false }));
       ls.renderOrder = 2; g.add(ls);
     }
-    g.visible = t.state === 'board';
+    g.visible = t.state === 'board' && layerVisible(t);
     t.obj = g; t.mBase = t.mSlab = body.material; t.mFace = face.material; t.pick = [body, face];
     boardGroup.add(g);
   }
@@ -358,10 +367,17 @@ function buildMeshes() {
 function aliveOnBoard(t) { return t.state === 'board' || t.state === 'selected'; }
 function isFree(t) { return aliveOnBoard(t) && t.coveredBy.every(j => !aliveOnBoard(G.tiles[j])); }
 function refreshDark(instant) {
-  for (const t of G.tiles) { t.darkTarget = isFree(t) ? 0 : S.blockedDarken; if (instant) t.dark = t.darkTarget; }
+  const top = BOUNDS ? BOUNDS.maxL : 0;
+  for (const t of G.tiles) {
+    // 每低一层固定变暗一点（参考里露出的下层牌比顶层牌面暗 ~5%），被压住的再叠加 blockedDarken
+    const dd = Math.min(0.9, (top - t.layer) * (S.depthDarken || 0));
+    t.darkTarget = 1 - (1 - dd) * (1 - (isFree(t) ? 0 : S.blockedDarken)); if (instant) t.dark = t.darkTarget;
+  }
   applyDark();
 }
 const _c = new THREE.Color();
+const LAYER_TINTS = ['#ff7a7a', '#7ad67a', '#7aa8ff', '#ffd25a', '#d67aff', '#5ae0e0', '#ffa65a', '#bbbbbb'];
+function layerVisible(t) { return S.layerDebug !== 'only' || S.layerOnly < 0 || t.layer === S.layerOnly; }
 function applyDark() {
   for (const t of G.tiles) {
     if (!t.mFace) continue;
@@ -370,6 +386,7 @@ function applyDark() {
     if (t.mFace.map !== map) { t.mFace.map = map; t.mFace.needsUpdate = true; }
     t.mFace.color.setRGB(f, f, f);
     if (sel) t.mSlab.color.set(S.selectTint).multiplyScalar(f); else t.mSlab.color.setRGB(f, f, f);
+    if (S.layerDebug === 'tint') { const c = LAYER_TINTS[t.layer % LAYER_TINTS.length]; t.mFace.color.multiply(_c.set(c)); t.mSlab.color.multiply(_c.set(c)); }
   }
 }
 
@@ -1202,7 +1219,7 @@ function pickTile(p) {
   const nd = new THREE.Vector2((p.x - VP.x) / VP.w * 2 - 1, -((p.y - VP.y) / VP.h * 2 - 1));
   raycaster.setFromCamera(nd, camera);
   const objs = [];
-  for (const t of G.tiles) if (t.state === 'board' || t.state === 'selected') objs.push(...t.pick);
+  for (const t of G.tiles) if ((t.state === 'board' || t.state === 'selected') && t.obj && t.obj.visible) objs.push(...t.pick);
   const hits = raycaster.intersectObjects(objs, false);
   if (!hits.length) return null;
   let best = null;
@@ -1234,7 +1251,7 @@ function onSetting(item, v) {
   if (item.kind === 'regen') scheduleRegen();
   else if (item.kind === 'mesh') { if (G) { clearFaceCache(); buildMeshes(); fitCamera(); } }
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
-  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY', 'centerOn'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
+  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY', 'centerOn'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if ((item.k === 'blockedDarken' || item.k === 'depthDarken') && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
   if (item.k === 'manualHand') updateCursor();
 }

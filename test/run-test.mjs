@@ -43,8 +43,8 @@ await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_pan
 // 托盘模式 + 3 张消除 + 改间隙/错位/层数 的快速逻辑测试
 const res = await page.evaluate(async () => {
   const out = [];
-  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }]) {
-    __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'top';
+  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 0, insetY: 1, layers: 3, winCondition: 'clear' }]) {
+    __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'top'; __app.S.insetX = -1; __app.S.insetY = 0;
     for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
     __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
     __app.newGame(true);
@@ -123,6 +123,16 @@ await page.click('#mbUndo'); await page.waitForTimeout(300);
 const v9undo = await page.evaluate(() => [__app.S.stackMode, __app.S.offsetX, __app.S.meetX]);
 const v9imp = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 8, stackMode: 'offset', meetX: 0.4 })); return [__app.S.stackMode, __app.S.meetX]; });
 console.log('v8->v9 migration', { reset: v9a, afterUndo: v9undo, imported: v9imp });
+// v10：v9 默认 insetX 0 / 旧阴影 → 新默认；自定义值保留
+await page.waitForTimeout(1200);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 9, insetX: 0, shadowStrength: 0.5, shadowDX: -0.07, shadowDY: 0.03 })));
+await page.reload(); await page.waitForTimeout(800);
+const v10a = await page.evaluate(() => [__app.S.insetX, __app.S.shadowStrength, __app.S.shadowDX, __app.S.depthDarken, __app.S.layerOffsetX, __app.G.tiles.length, __app.S.settingsVersion]);
+await page.waitForTimeout(1200);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 9, insetX: 0.5, shadowStrength: 0.3 })));
+await page.reload(); await page.waitForTimeout(800);
+const v10b = await page.evaluate(() => [__app.S.insetX, __app.S.shadowStrength]);
+console.log('v9->v10 migration', { oldDefaults: v10a, custom: v10b });
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);

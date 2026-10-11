@@ -18,10 +18,10 @@ export function layerGrids(S) {
     for (let i = 0; i < N; i++) {
       const k = S.stackGridRef === 'base' ? -i : N - 1 - i; // 'top'：列/行数指顶层，下层逐层变大
       const c = S.baseCols + k * dc, r = S.baseRows + k * dr;
-      if (c < 1 || r < 1) break;
+      if (c < 1 || r < 1) { if (S.stackGridRef === 'base') break; continue; } // 'top' 且下层变窄：太窄的底层直接省略
       out.push([c, r]);
     }
-    return out;
+    return out.length ? out : [[S.baseCols, S.baseRows]];
   }
   for (let i = 0; i < S.layers; i++) {
     const c = S.baseCols - i * S.shrinkCols, r = S.baseRows - i * S.shrinkRows;
@@ -47,7 +47,12 @@ export function generateBoard(S) {
       const m = L - (NL - 1) / 2;
       ox = -(cols - 1) / 2 * px + m * (S.stackNudgeX || 0) * px;
       oy = (rows - 1) / 2 * py - m * (S.stackNudgeY || 0) * py;
-      st = r => ((r % 2) - (rows > 1 ? 0.5 : 0)) * (S.rowStagger || 0) * px;
+      // 砖块错位的奇偶以“最高层的行号”为准：层与层行数相差偶数行时，对齐的行必须同奇偶，
+      // 否则下层整行反向错开半张、从上层缝隙里露出来（v9 及以前 insetY=1 时的 bug）
+      const rTop = grids[NL - 1][1], sh = (rows - rTop) / 2, shI = Number.isInteger(sh) ? sh : Math.floor(sh);
+      const par = r => (((r - shI) % 2) + 2) % 2;
+      const half = rTop > 1 || rows > 1 ? 0.5 : 0;
+      st = r => (par(r) - half) * (S.rowStagger || 0) * px;
     } else { // 旧版：所有层以底层为基准，按层单向错位
       const k = S.altOffset ? (L % 2) : L;
       ox = -(c0 - 1) / 2 * px + k * S.offsetX * px;
@@ -64,7 +69,9 @@ export function generateBoard(S) {
   pos.sort((a, b) => a.layer - b.layer);
   const kept = [];
   for (const p of pos) {
-    if (p.layer === 0 || kept.some(q => q.layer === p.layer - 1 && overlap(p, q))) kept.push(p);
+    // 下层比上层窄（参考视频：顶层两侧边缘列下面是空的）时允许上层边缘悬空
+    const overhang = centered && ((S.insetX || 0) < 0 || (S.insetY || 0) < 0);
+    if (p.layer === 0 || overhang || kept.some(q => q.layer === p.layer - 1 && overlap(p, q))) kept.push(p);
   }
   pos = kept;
   const m = S.matchCount;

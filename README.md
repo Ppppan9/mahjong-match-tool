@@ -73,6 +73,15 @@ three.js 为 MIT 协议，详见 `THIRD_PARTY_LICENSES.txt`。牌面与图形均
 * 旧版“单向错位”保留为 `stackMode: offset`；旧存档若自定义过错位/递减参数、或导入旧版 JSON，会自动沿用旧版方式（设置版本 6）。
 * 检查脚本：`node test/stack-shot.mjs` 生成 `screenshots/stack_centered.jpg`、`stack_centered_5layers.jpg` 并输出左右边距。
 
+## v10 更新：层次结构与可读性（对齐参考视频）
+
+* 参考视频：下层与顶层同一砖块位置、同样大小，但**每低一层两侧各少一列**（顶层边缘牌拿掉后是黑洞），下层牌面向右下错开约一个牌厚、更暗、带上层投影。
+* 修复：v9 把层间错位完全抵消导致各层像素级重合、分不清层次；三层同尺寸没有空洞；无按深度变暗；投影看不见；行数差偶数时砖块奇偶反向的 bug；下层变窄时边缘牌被误删。
+* 新默认：`insetX -1`、`layerOffsetX/Y 0.045/0.075`、`depthDarken 0.12`、投影 0.8（-0.1/0.04）。顶层取景与严格居中不变。
+* 新增“分层调试”（按层着色 / 只显示某一层）。
+* 截图：`screenshots/layers_debug.jpg`、`layers_readability.jpg`、`compare_holes.jpg`、`compare_holes_zoom.jpg`、`layers_viewport_1440x900.jpg`。
+* 本地存档里 v9 的默认值（insetX 0、旧阴影）自动升级为新默认，自定义值保留。
+
 ## v9 更新：修复实机画面 / 顶层严格居中 / 碰撞 / 音效
 
 * **根因**：在线版的旧本地存档会残留旧版布局参数（单向错位 offset 模式、层微调、旧汇合点、旧阴影等），以前的迁移把“与旧默认不同”的值当作自定义保留，于是画面层层错开、顶层偏左。另外相机按含右下侧面的包围盒居中，顶层牌面本身偏左约 4.5 px。
