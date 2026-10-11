@@ -49,7 +49,7 @@ export function createAERecorder(api) {
 
   function newBoard(G, t) {
     // 旧棋盘的牌全部在此刻结束
-    for (const tr of R.tiles.values()) if (tr.gen === R.gen) { const last = tr.s[tr.s.length - 1]; if (last && last[1]) pushChange(tr, t, [0, last[2], last[3]]); }
+    for (const tr of R.tiles.values()) if (tr.gen === R.gen) { const last = tr.s[tr.s.length - 1]; if (last && last[1]) pushChange(tr, t, [0, ...last.slice(2)]); }
     R.gen++; R.G = G;
     R.boards.push({ gen: R.gen, t0: t, layers: Math.max(...G.tiles.map(x => x.layer)) + 1 });
     if (!R.shared) R.shared = api.renderTileShared(G.tiles[0]);
@@ -70,7 +70,8 @@ export function createAERecorder(api) {
     if (G && G === R.G) {
       for (const tile of G.tiles) {
         const tr = R.tiles.get(R.gen + '_' + tile.id); if (!tr) continue;
-        pushChange(tr, t, [tile.obj && tile.obj.visible ? 1 : 0, r3(tile.dark || 0), tile.state === 'selected' ? 1 : 0]);
+        const pq = api.tilePress(tile); // 点击按下：牌面中心位移(px) + 缩放
+        pushChange(tr, t, [tile.obj && tile.obj.visible ? 1 : 0, r3(tile.dark || 0), tile.state === 'selected' && tile.tintOn !== false ? 1 : 0, r3(pq.dx), r3(pq.dy), r3(pq.s)]);
       }
       for (const sp of G.sprites) {
         const id = idOf(sp);
@@ -290,14 +291,15 @@ export function createAERecorder(api) {
           if (tin === null) continue;
           const fin = Math.round(tin * fps) / fps, fout = tout === null ? D : Math.max(fin + 1 / fps, Math.round(tout * fps) / fps);
           const nm = `${N('第' + (li + 1) + '层', 'L' + (li + 1))} r${tr.row + 1}c${tr.col + 1} ${tr.key}`;
-          const pos = [tr.x * K, tr.y * K], sc = [100 * K, 100 * K];
           const base = { in: fin, out: fout, label: lab };
           const taps = (rec.tapTimes.get(tr.id) || []).map(t => [r4(t), N('点击', 'tap')]);
           const na = tileAsset.get(tr.key + '|n');
-          if (A.shadow) shadows.push(L(N('阴影 ', 'shadow ') + nm, { asset: A.shadow.id }, { ...base, tr: { anchor: [A.shadow.ax, A.shadow.ay], position: pos, scale: sc } }));
-          body.push(L(N('牌 ', 'tile ') + nm, { asset: na.id }, { ...base, markers: taps.length ? taps : undefined, tr: { anchor: [na.ax, na.ay], position: pos, scale: sc } }));
           const live = s.filter(e => e[0] <= fout + 1e-9);
           const fr = frames(live.length > 1 ? live : [live[0], [fout, ...live[0].slice(1)]]);
+          // 点击按下：位置/缩放关键帧（无按下时为常量）；阴影/选中/压暗/接触阴影图层同步
+          const pos = prop(fr, v => [(tr.x + (v[4] || 0)) * K, (tr.y + (v[5] || 0)) * K], TOL.pos), sc = prop(fr, v => [(v[6] ?? 1) * 100 * K, (v[6] ?? 1) * 100 * K], TOL.scale);
+          if (A.shadow) shadows.push(L(N('阴影 ', 'shadow ') + nm, { asset: A.shadow.id }, { ...base, tr: { anchor: [A.shadow.ax, A.shadow.ay], position: pos, scale: sc } }));
+          body.push(L(N('牌 ', 'tile ') + nm, { asset: na.id }, { ...base, markers: taps.length ? taps : undefined, tr: { anchor: [na.ax, na.ay], position: pos, scale: sc } }));
           if (s.some(e => e[3])) {
             const sa = tileAsset.get(tr.key + '|s');
             body.push(L(N('选中 ', 'selected ') + nm, { asset: sa.id }, { ...base, tr: { anchor: [sa.ax, sa.ay], position: pos, scale: sc, opacity: prop(fr, v => v[3] ? 100 : 0, 0, true) } }));

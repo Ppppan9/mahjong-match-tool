@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 12;
+const SETTINGS_VERSION = 13;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -80,6 +80,16 @@ function migrate(j, fromStorage = false) {
     }
   }
   delete j.shadowOffset;
+  // v13：点击反馈改为“按下”效果，默认去掉点击波纹圈与选中描边（参考视频都没有）。
+  //  本地旧存档：自定义过波纹参数的保留波纹；其余用新默认。导入的旧 JSON：原样还原旧观感（波纹+描边、无按下）。
+  if ((j.settingsVersion || 1) < 13 && Object.keys(j).length > 1) {
+    if (fromStorage) {
+      const RIP0 = { rippleColor: '#ffe14d', rippleSize: 0.09, rippleWidth: 4, rippleDuration: 450 };
+      if (!('tapRipple' in j) && Object.entries(RIP0).some(([k, v]) => k in j && String(j[k]).toLowerCase() !== String(v))) j.tapRipple = true;
+    } else {
+      for (const [k, v] of Object.entries({ tapRipple: true, selectBorder: true, pressEnabled: false })) if (!(k in j)) j[k] = v;
+    }
+  }
   // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）
   if (!j.theme || !THEMES[j.theme]) j.theme = 'guofeng';
   if (!j.themeStore || typeof j.themeStore !== 'object' || Array.isArray(j.themeStore)) j.themeStore = {};
@@ -184,8 +194,10 @@ function faceCanvasSel(key) {
     gr.addColorStop(0, `rgba(${tint.join(',')},0.9)`); gr.addColorStop(0.45, `rgba(${tint.join(',')},0.4)`); gr.addColorStop(1, `rgba(${tint.join(',')},0)`);
     g.fillStyle = gr; g.fillRect(0, 0, c.width, c.height);
     g.globalCompositeOperation = 'source-over';
-    g.strokeStyle = shade(S.selectTint, 0.8); g.lineWidth = c.width * 0.035;
-    rr(g, g.lineWidth / 2, g.lineWidth / 2, c.width - g.lineWidth, c.height - g.lineWidth, S.cornerRadius * c.width * 0.9); g.stroke();
+    if (S.selectBorder) { // 旧版的绿色描边“框”（参考视频没有，默认关闭）
+      g.strokeStyle = shade(S.selectTint, 0.8); g.lineWidth = c.width * 0.035;
+      rr(g, g.lineWidth / 2, g.lineWidth / 2, c.width - g.lineWidth, c.height - g.lineWidth, S.cornerRadius * c.width * 0.9); g.stroke();
+    }
     faceCache.set(ck, c);
   }
   return faceCache.get(ck);
@@ -237,7 +249,7 @@ function layerComp(L) {
 }
 const wX = t => t.x + layerComp(t.layer).x, wY = t => t.y + layerComp(t.layer).y;
 function applyShear() {
-  if (G) for (const t of G.tiles) if (t.obj) t.obj.position.set(wX(t), wY(t), t.layer * S.tileThick);
+  if (G) for (const t of G.tiles) if (t.obj) { t.obj.position.set(wX(t), wY(t), t.layer * S.tileThick); t.obj.userData.base = { x: t.obj.position.x, y: t.obj.position.y, z: t.obj.position.z }; applyPress(t); }
   const { kx, ky } = shearK();
   boardGroup.matrixAutoUpdate = false;
   boardGroup.matrix.set(1, 0, -kx, 0, 0, 1, ky, 0, 0, 0, 1, 0, 0, 0, 0, 1);
@@ -365,7 +377,7 @@ function buildMeshes() {
   const lsGeo = new THREE.PlaneGeometry(lsw, th * 0.97); lsGeo.translate(-tw * 0.4975 - lsw / 2 + tw * 0.01, 0, thick + 0.006);
   for (const t of G.tiles) {
     const g = new THREE.Group();
-    g.position.set(wX(t), wY(t), t.layer * thick);
+    g.position.set(wX(t), wY(t), t.layer * thick); g.userData.base = { x: g.position.x, y: g.position.y, z: g.position.z };
     const body = new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ vertexColors: true }));
     const face = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ map: faceTexture(t.key), alphaTest: 0.5 }));
     const sh = new THREE.Mesh(shGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, opacity: S.shadowStrength, depthWrite: false }));
@@ -379,6 +391,7 @@ function buildMeshes() {
     }
     g.visible = t.state === 'board' && layerVisible(t);
     t.obj = g; t.mBase = t.mSlab = body.material; t.mFace = face.material; t.pick = [body, face];
+    if (t.state !== 'selected') t.press = 0; applyPress(t);
     boardGroup.add(g);
   }
   refreshDark(true);
@@ -400,7 +413,7 @@ function layerVisible(t) { return S.layerDebug !== 'only' || S.layerOnly < 0 || 
 function applyDark() {
   for (const t of G.tiles) {
     if (!t.mFace) continue;
-    const f = 1 - t.dark, sel = t.state === 'selected';
+    const f = (1 - t.dark) * (1 - (S.pressDarken || 0) * Math.max(0, Math.min(1, t.press || 0))), sel = t.state === 'selected' && t.tintOn !== false;
     const map = faceTexture(sel ? t.key + '#sel' : t.key);
     if (t.mFace.map !== map) { t.mFace.map = map; t.mFace.needsUpdate = true; }
     t.mFace.color.setRGB(f, f, f);
@@ -421,6 +434,13 @@ function tileScreen(t) {
   const x = wX(t), y = wY(t);
   const c = project(x, y, z), r = project(x + G.tw / 2, y, z), u = project(x, y + G.th / 2, z);
   return { x: c.x, y: c.y, w: Math.abs(r.x - c.x) * 2, h: Math.abs(u.y - c.y) * 2 };
+}
+// 按下姿态下牌面的屏幕中心与缩放（飞行起点 / AE 关键帧）
+function tileScreenPressed(t, p = t.press || 0) {
+  const q = pressPose(t, p), k = t.selS || 1;
+  const z = t.layer * S.tileThick + (1 - q.c) * S.tileThick;
+  const c = project(wX(t) + q.ox, wY(t) + q.oy, z), c0 = tileScreen(t);
+  return { x: c.x, y: c.y, s: q.s * k, dx: c.x - c0.x, dy: c.y - c0.y };
 }
 function slotRect(i) {
   // 参考：5 格从 x≈0.392W 到 0.958W，格宽≈73/720，高≈87/1280，竖直中心≈0.487×顶栏高
@@ -493,20 +513,45 @@ function clickTile(t, fromHand = false) {
   if (G.selected.length >= S.matchCount) matchSelected();
   return true;
 }
+// ---------------- 点击按下（参考视频：牌面缩小并向底座下沉，像按钮被按下去；选中期间保持） ----------------
+// t.press：0=未按下 1=完全按下（过冲时可略超出 0..1）。3D：整张牌 xy 缩放 pressScale、z 方向压缩 pressSide（牌面随之
+// 沿 2.5D 侧面方向向右下移动、露出的侧面变薄），再加 pressOffsetX/Y 的额外偏移
+const easeOutBackK = c1 => t => { if (c1 <= 0) return 1 - Math.pow(1 - t, 3); const c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+function pressPose(t, p = t.press || 0) {
+  const s = 1 + (S.pressScale - 1) * p, c = Math.max(-0.5, Math.min(0.95, S.pressSide * p));
+  return { s, c, ox: S.pressOffsetX * p * G.tw, oy: -S.pressOffsetY * p * G.th };
+}
+function applyPress(t) {
+  if (!t.obj) return;
+  const q = pressPose(t), k = t.selS || 1, b = t.obj.userData.base;
+  t.obj.scale.set(q.s * k, q.s * k, 1 - q.c);
+  if (b) t.obj.position.set(b.x + q.ox, b.y + q.oy, b.z);
+}
+function pressTo(t, target) {
+  const tok = t.pressTok = (t.pressTok || 0) + 1;
+  if (!S.pressEnabled) { t.press = 0; applyPress(t); return; }
+  const p0 = t.press || 0, dur = target > p0 ? S.pressDownMs : S.pressReleaseMs, ease = easeOutBackK(S.pressOvershoot || 0);
+  if (dur <= 0) { t.press = target; applyPress(t); applyDark(); return; }
+  tween(dur, k => { if (t.pressTok !== tok) return; t.press = p0 + (target - p0) * ease(k); applyPress(t); if (S.pressDarken > 0) applyDark(); }, x => x);
+}
 // 选中：牌留在原位，染上绿色（视频：点击后立即变绿，等待第二张）
 function select(t) {
   AE.onTap(t);
   sfx('Tap');
   t.state = 'selected';
   G.selected.push(t.id);
+  pressTo(t, 1);
+  // 参考：先按下，约 1 帧后才变绿（selectTintDelay）
+  if (S.selectTintDelay > 0) { t.tintOn = false; const tok = t.pressTok; tween(S.selectTintDelay, (k, raw) => { if (raw >= 1 && t.pressTok === tok && t.state === 'selected') { t.tintOn = true; applyDark(); } }, x => x); }
+  else t.tintOn = true;
   applyDark();
-  if (S.selectScale > 1.001) tween(160, k => { const s = 1 + (S.selectScale - 1) * Math.sin(k * Math.PI / 2); if (t.state === 'selected') t.obj.scale.set(s, s, 1); }, easeOut);
+  if (S.selectScale > 1.001) tween(160, k => { const s = 1 + (S.selectScale - 1) * Math.sin(k * Math.PI / 2); if (t.state === 'selected') { t.selS = s; applyPress(t); } }, easeOut);
 }
 function deselect(t) {
   if (t.state !== 'selected') return;
   t.state = 'board';
   G.selected = G.selected.filter(id => id !== t.id);
-  t.obj.scale.set(1, 1, 1);
+  t.selS = 1; pressTo(t, 0); applyPress(t);
   applyDark();
 }
 const bez3 = (a, b, c, d, k) => { const u = 1 - k; return u * u * u * a + 3 * u * u * k * b + 3 * u * k * k * c + k * k * k * d; };
@@ -514,12 +559,13 @@ const bez3 = (a, b, c, d, k) => { const u = 1 - k; return u * u * u * a + 3 * u 
 function matchSelected() {
   const ts = G.selected.map(id => G.tiles[id]); G.selected = [];
   const scr = ts.map(t => tileScreen(t));
+  const ps = ts.map(t => tileScreenPressed(t)); // 参考：从按下的姿态直接起飞
   const key = ts[0].key;
-  ts.forEach(t => { t.state = 'gone'; t.obj.visible = false; t.obj.scale.set(1, 1, 1); });
+  ts.forEach(t => { t.state = 'gone'; t.obj.visible = false; t.pressTok = (t.pressTok || 0) + 1; t.press = 0; t.selS = 1; applyPress(t); });
   if (isTarget(key)) G.letterLogical = (G.letterLogical || 0) + 1;
   refreshDark();
   const n = ts.length;
-  const sps = ts.map((t, i) => { const sp = makeSprite(t, scr[i]); sp.tint = 1; sp.z = 5; sp.moving = true; return sp; });
+  const sps = ts.map((t, i) => { const sp = makeSprite(t, { ...scr[i], x: ps[i].x, y: ps[i].y }); sp.scale = ps[i].s; sp.tint = 1; sp.z = 5; sp.moving = true; return sp; });
   sfx('Whoosh', { dur: Math.max(0.25, S.flyDuration / 1000) });
   const w = scr[0].w * S.flyScale, hh = scr[0].h * S.flyScale;
   let mx, my;
@@ -553,11 +599,11 @@ function matchSelected() {
       p1 = { x: ex, y: sp.y - H * 0.03 * S.arcBend }; p2 = { x: ex, y: ty };
     }
     const p3 = { x: tx, y: ty };
-    const w0 = sp.w, h0 = sp.h;
+    const w0 = sp.w, h0 = sp.h, s0 = sp.scale;
     return tween(S.flyDuration, (k, raw) => {
       sp.x = bez3(p0.x, p1.x, p2.x, p3.x, k); sp.y = bez3(p0.y, p1.y, p2.y, p3.y, k);
       const u = raw ?? k; // 放大按真实时间走：前段长得快，接近汇合时已到最大
-      sp.scale = 1 + (S.flyScale - 1) * (1 - (1 - u) * (1 - u));
+      sp.scale = s0 + (S.flyScale - s0) * (1 - (1 - u) * (1 - u));
       sp.rot = S.flyRotate * Math.sin(Math.PI * k) * (side || 1);
       sp.w = w0; sp.h = h0;
     }, ease);
@@ -714,7 +760,7 @@ function handMoveTo(x, y, dur) {
     HAND.x = a * fx + b * cx + c * x; HAND.y = a * fy + b * cy + c * y;
   }, easeInOut);
 }
-function addRipple(x, y) { G && G.ripples.push({ x, y, t0: performance.now() }); }
+function addRipple(x, y) { if (G && S.tapRipple) G.ripples.push({ x, y, t0: performance.now() }); }
 async function handPress(onDown, spd = 1) {
   await tween(90 / spd, k => { HAND.press = k; }, easeOut);
   addRipple(HAND.x, HAND.y);
@@ -1382,6 +1428,7 @@ function refreshTheme() {
 }
 function onSetting(item, v) {
   if (item.k === 'theme') { setTheme(v); return; }
+  if (/^press/.test(item.k) && G) { S[item.k] = v; saveSettings(); for (const t of G.tiles) { if (t.state === 'selected') { t.pressTok = (t.pressTok || 0) + 1; t.press = S.pressEnabled ? 1 : 0; } applyPress(t); } applyDark(); return; }
   S[item.k] = v; saveSettings();
   if (item.type === 'file') loadImg(item.k);
   if (item.kind === 'regen') scheduleRegen();
@@ -1543,8 +1590,8 @@ function isolateRender(t, o) {
   const ch = t.obj.children, cvis = ch.map(c => c.visible);
   const [body, face, sh, ls] = ch;
   body.visible = !!o.body; face.visible = !!o.face; sh.visible = !!o.sh; if (ls) ls.visible = !!o.ls;
-  const fm = t.mFace.map, fc = t.mFace.color.clone(), sc = t.mSlab.color.clone(), osc = t.obj.scale.clone();
-  t.obj.scale.set(1, 1, 1);
+  const fm = t.mFace.map, fc = t.mFace.color.clone(), sc = t.mSlab.color.clone(), osc = t.obj.scale.clone(), opos = t.obj.position.clone();
+  t.obj.scale.set(1, 1, 1); if (t.obj.userData.base) t.obj.position.set(t.obj.userData.base.x, t.obj.userData.base.y, t.obj.userData.base.z);
   t.mFace.map = faceTexture(o.sel ? t.key + '#sel' : t.key);
   if (o.black) { t.mFace.color.setRGB(0, 0, 0); t.mSlab.color.setRGB(0, 0, 0); }
   else { t.mFace.color.setRGB(1, 1, 1); if (o.sel) t.mSlab.color.set(S.selectTint); else t.mSlab.color.setRGB(1, 1, 1); }
@@ -1552,7 +1599,7 @@ function isolateRender(t, o) {
   const full = document.createElement('canvas'); full.width = VP.w; full.height = VP.h;
   const g = full.getContext('2d'); g.drawImage(glCanvas, 0, 0, VP.w, VP.h);
   // 还原
-  t.mFace.map = fm; t.mFace.color.copy(fc); t.mSlab.color.copy(sc); t.obj.scale.copy(osc);
+  t.mFace.map = fm; t.mFace.color.copy(fc); t.mSlab.color.copy(sc); t.obj.scale.copy(osc); t.obj.position.copy(opos);
   ch.forEach((c, i) => { c.visible = cvis[i]; });
   G.tiles.forEach((x, i) => { x.obj.visible = vis[i]; });
   // 裁切
@@ -1569,6 +1616,7 @@ function isolateRender(t, o) {
 const AE = createAERecorder({
   env: () => ({ S, G, W, H, U, VP, IMG, canvas }),
   renderTile: (t, sel) => isolateRender(t, { body: true, face: true, sel }),
+  tilePress: t => { if (!G || !t.obj || (!(t.press) && (t.selS || 1) === 1)) return { dx: 0, dy: 0, s: 1 }; const q = tileScreenPressed(t); return { dx: q.dx, dy: q.dy, s: q.s }; },
   renderTileShared: t => ({ shadow: isolateRender(t, { sh: true }), sil: isolateRender(t, { body: true, face: true, black: true }), band: S.leftShadow > 0 ? isolateRender(t, { ls: true }) : null }),
   tileScreen, particleState, rippleState, seamState, flashState, introLetterStates, introDimState, wordGlowState, endCardState, handState, endButtonRect,
   withCtx(c2d, fn) { const old = ctx; ctx = c2d; try { fn(); } finally { ctx = old; } },
@@ -1613,7 +1661,7 @@ window.__app = {
   AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
-  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
+  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
 };
 
 buildPanel();
