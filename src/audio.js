@@ -68,11 +68,43 @@ const SYNTH = {
 export const SFX_NAMES = Object.keys(SYNTH);
 export function sfx(name, opt = {}) {
   const S = getS();
-  if (S.sfxMute || S['sfx' + name] === false) return;
   const vol = (S.sfxVolume ?? 0.7) * (S['sfx' + name + 'Vol'] ?? 1) * (opt.vol ?? 1);
-  if (vol <= 0.001) return;
+  const audible = !(S.sfxMute || S['sfx' + name] === false) && vol > 0.001;
+  if (sfxHook) try { sfxHook(name, vol, opt, audible); } catch (e) { console.warn(e); }
+  if (!audible) return;
   if (!ensure() || AC.state !== 'running') return;
   const g = AC.createGain(); g.gain.value = vol; g.connect(master);
   try { SYNTH[name](g, AC.currentTime + 0.005 + (opt.delay || 0), opt.dur); } catch (e) { console.warn(e); }
   setTimeout(() => g.disconnect(), 3000);
+}
+
+// —— 导出 AE 工程用 ——
+let sfxHook = null;
+export function setSfxHook(fn) { sfxHook = fn; }
+// 用 OfflineAudioContext 离线合成：events = [{t, name, vol, delay, dur}]，返回 AudioBuffer（单声道）
+export async function renderSfxOffline(events, duration, sampleRate = 44100) {
+  const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!Off) return null;
+  const len = Math.max(1, Math.ceil((duration + 0.05) * sampleRate));
+  const off = new Off(1, len, sampleRate);
+  const saveAC = AC, saveNoise = noiseBuf;
+  AC = off; noiseBuf = null;
+  try {
+    const comp = off.createDynamicsCompressor(); comp.threshold.value = -10; comp.ratio.value = 4; comp.connect(off.destination);
+    for (const e of events) {
+      const g = off.createGain(); g.gain.value = e.vol; g.connect(comp);
+      try { SYNTH[e.name](g, e.t + 0.005 + (e.delay || 0), e.dur); } catch (err) { console.warn(err); }
+    }
+  } finally { AC = saveAC; noiseBuf = saveNoise; }
+  return off.startRendering();
+}
+export function encodeWav(buf) {
+  const ch = 1, sr = buf.sampleRate, d = buf.getChannelData(0), n = d.length;
+  const out = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o, str) => { for (let i = 0; i < str.length; i++) out.setUint8(o + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); out.setUint32(16, 16, true);
+  out.setUint16(20, 1, true); out.setUint16(22, ch, true); out.setUint32(24, sr, true); out.setUint32(28, sr * ch * 2, true);
+  out.setUint16(32, ch * 2, true); out.setUint16(34, 16, true); w(36, 'data'); out.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { const v = Math.max(-1, Math.min(1, d[i])); out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true); }
+  return new Uint8Array(out.buffer);
 }

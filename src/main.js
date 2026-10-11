@@ -3,6 +3,7 @@ import { DEFAULTS, SCHEMA } from './settings.js';
 import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { loadFonts, FONT_LOGO } from './fonts.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
+import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
@@ -93,7 +94,7 @@ function saveSettings() {
 // ---------------- DOM ----------------
 const $ = s => document.querySelector(s);
 const canvas = $('#stage');
-const ctx = canvas.getContext('2d');
+let ctx = canvas.getContext('2d'); // 导出 AE 素材时会临时切换到离屏画布
 let W = 720, H = 1280, U = 1;
 const glCanvas = document.createElement('canvas');
 const renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -485,6 +486,7 @@ function clickTile(t, fromHand = false) {
 }
 // 选中：牌留在原位，染上绿色（视频：点击后立即变绿，等待第二张）
 function select(t) {
+  AE.onTap(t);
   sfx('Tap');
   t.state = 'selected';
   G.selected.push(t.id);
@@ -677,7 +679,7 @@ function spawnParticles(x, y, size, swirl = true, countScale = 1) {
       cx: x, cy: y, a: (i / n) * Math.PI * 2 + rand(-0.3, 0.3), r0: rand(0.15, 0.55) * size,
       vr: rand(0.5, 1.3) * size * S.particleSpeed, va: dir * rand(2.5, 5) * S.particleSpeed,
       rot: rand(0, 6.28), vrot: rand(-6, 6), s: rand(0.22, 0.36) * size * S.particleSize * (size > 0 ? 1 : 0),
-      col: `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`, t0: performance.now(), life: S.burstDuration * rand(0.75, 1.1),
+      m, col: `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`, t0: performance.now(), life: S.burstDuration * rand(0.75, 1.1),
     });
   }
 }
@@ -845,6 +847,7 @@ function startRecording(auto = false) {
   try { rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: Math.round(S.recBitrate * 1e6), audioBitsPerSecond: 128000 }); }
   catch (e) { toast('录制启动失败：' + e.message); return; }
   REC.rec = rec; REC.chunks = []; REC.mime = rec.mimeType || mime; REC.t0 = performance.now(); REC.auto = auto;
+  REC.ae = false; if (S.aeWithRec && !AE.active()) { aeStart(); REC.ae = true; }
   rec.ondataavailable = e => { if (e.data && e.data.size) REC.chunks.push(e.data); };
   rec.onstop = () => {
     const type = REC.mime || 'video/webm';
@@ -857,6 +860,7 @@ function startRecording(auto = false) {
     window.__lastRecording = { name, url, size: blob.size, type };
     const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     REC.rec = null; renderRecList(); updateButtons();
+    if (REC.ae && AE.active()) { REC.ae = false; aeStopAndExport(); }
     toast(`录制完成：${name}（${(blob.size / 1048576).toFixed(1)} MB）`);
   };
   rec.start(250);
@@ -905,8 +909,11 @@ function drawBackground() {
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
 }
-function drawTopBar(now) {
+// part：'all' | 'base' | 'logo' | 'slot'（配合 onlySlot） | 'intro' | 'glow'，供导出 AE 素材时单独绘制某一部分
+function drawTopBar(now, part = 'all', onlySlot = -1) {
   const th = H * S.topBarHeight;
+  const P = x => part === 'all' || part === x;
+  if (P('base')) {
   // 参考：纯色深棕木板（几乎无渐变）+ 极淡木纹，底部一条较亮的倒角，再下面是黑色
   ctx.fillStyle = S.topBarColor; ctx.fillRect(0, 0, W, th);
   ctx.save(); ctx.globalAlpha = 0.05; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.2 * U;
@@ -920,10 +927,12 @@ function drawTopBar(now) {
   ctx.fillStyle = bg; ctx.fillRect(0, th - bv, W, bv + 3 * U);
   const sg = ctx.createLinearGradient(0, th + 3 * U, 0, th + 12 * U); sg.addColorStop(0, 'rgba(0,0,0,.6)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = sg; ctx.fillRect(0, th + 3 * U, W, 9 * U);
-  drawLogo(th);
+  }
+  if (P('logo')) drawLogo(th);
   // 托盘格：参考为“刻进木板”的圆角槽——内部与木板同色，上/左缘深色内阴影，下/右缘亮色高光
   const sc = hexRgb(S.slotColor);
   for (let i = 0; i < S.slotCount; i++) {
+    if (!(part === 'all' || (part === 'slot' && (onlySlot < 0 || onlySlot === i)))) continue;
     const r = slotRect(i), rad = r.w * 0.13;
     ctx.save();
     ctx.fillStyle = `rgba(${sc.join(',')},0.18)`; rr(ctx, r.x, r.y, r.w, r.h, rad); ctx.fill();
@@ -938,32 +947,46 @@ function drawTopBar(now) {
     ctx.restore();
   }
   // 开场目标词：字母逐个弹出，停留后淡出（视频 0.4s~2.6s）
-  if (S.introWord && G) {
-    const el = (now - G.introT0) / 1000, end = S.introDelay + S.introDuration;
-    if (el > S.introDelay && el < end + 0.3) {
-      const fade = el < end ? 1 : 1 - (el - end) / 0.3;
-      for (let i = 0; i < G.word.length; i++) {
-        if (G.tray[i] && G.tray[i].letter) continue;
-        const t0 = S.introDelay + 0.1 + i * S.introStagger; if (el < t0) continue;
-        const k = Math.min(1, (el - t0) / 0.25), sc = 0.4 + 0.6 * easeBack(k);
-        const sl = slotTileSize(i);
-        drawTile2D('T' + G.word[i] + ':' + i, sl.x, sl.y, sl.w * sc, sl.h * sc, fade * Math.min(1, k * 2));
-      }
-    }
-  }
+  if (P('intro')) for (const L of introLetterStates(now)) drawTile2D(L.key, L.x, L.y, L.w, L.h, L.alpha);
   // 单词集齐发光
-  if (G && G.wordDoneT) {
-    const el = (now - G.wordDoneT) / 1000;
-    const pulse = el < 2 ? 0.6 + 0.4 * Math.sin(el * 10) : 0.55 + 0.15 * Math.sin(el * 3);
-    const a = slotRect(0), b = slotRect(G.word.length - 1);
-    ctx.save(); ctx.shadowColor = S.glowColor; ctx.shadowBlur = 28 * U * pulse; ctx.strokeStyle = S.glowColor; ctx.globalAlpha = Math.min(1, pulse + 0.2);
-    ctx.lineWidth = 4 * U; rr(ctx, a.x - 5 * U, a.y - 5 * U, b.x + b.w - a.x + 10 * U, a.h + 10 * U, a.w * 0.18); ctx.stroke(); ctx.stroke();
-    ctx.restore();
-    if (el < 2.2) { // 闪光星星
-      const rnd = mulberry32(Math.floor(el * 12));
-      for (let i = 0; i < 6; i++) { const x = lerp(a.x, b.x + b.w, rnd()), y = lerp(a.y, a.y + a.h, rnd()); star(x, y, (6 + rnd() * 8) * U, S.glowColor); }
-    }
+  const gs = wordGlowState(now);
+  if (gs && P('glow')) {
+    drawWordGlowRing(gs.pulse);
+    for (const st of gs.stars) star(st.x, st.y, st.r, S.glowColor);
   }
+}
+function introLetterStates(now) {
+  const out = [];
+  if (!(S.introWord && G)) return out;
+  const el = (now - G.introT0) / 1000, end = S.introDelay + S.introDuration;
+  if (!(el > S.introDelay && el < end + 0.3)) return out;
+  const fade = el < end ? 1 : 1 - (el - end) / 0.3;
+  for (let i = 0; i < G.word.length; i++) {
+    if (G.tray[i] && G.tray[i].letter) continue;
+    const t0 = S.introDelay + 0.1 + i * S.introStagger; if (el < t0) continue;
+    const k = Math.min(1, (el - t0) / 0.25), sc = 0.4 + 0.6 * easeBack(k);
+    const sl = slotTileSize(i);
+    out.push({ i, key: 'T' + G.word[i] + ':' + i, x: sl.x, y: sl.y, w: sl.w * sc, h: sl.h * sc, alpha: fade * Math.min(1, k * 2) });
+  }
+  return out;
+}
+function wordGlowState(now) {
+  if (!(G && G.wordDoneT)) return null;
+  const el = (now - G.wordDoneT) / 1000;
+  const pulse = el < 2 ? 0.6 + 0.4 * Math.sin(el * 10) : 0.55 + 0.15 * Math.sin(el * 3);
+  const a = slotRect(0), b = slotRect(G.word.length - 1), stars = [];
+  const win = Math.floor(el * 12);
+  if (el < 2.2) { // 闪光星星（每 1/12 秒换一批位置）
+    const rnd = mulberry32(win);
+    for (let i = 0; i < 6; i++) { const x = lerp(a.x, b.x + b.w, rnd()), y = lerp(a.y, a.y + a.h, rnd()); stars.push({ x, y, r: (6 + rnd() * 8) * U }); }
+  }
+  return { el, pulse, win, stars, opacity: Math.min(1, pulse + 0.2) };
+}
+function drawWordGlowRing(pulse, alphaOverride) {
+  const a = slotRect(0), b = slotRect(G.word.length - 1);
+  ctx.save(); ctx.shadowColor = S.glowColor; ctx.shadowBlur = 28 * U * pulse; ctx.strokeStyle = S.glowColor; ctx.globalAlpha = alphaOverride ?? Math.min(1, pulse + 0.2);
+  ctx.lineWidth = 4 * U; rr(ctx, a.x - 5 * U, a.y - 5 * U, b.x + b.w - a.x + 10 * U, a.h + 10 * U, a.w * 0.18); ctx.stroke(); ctx.stroke();
+  ctx.restore();
 }
 function star(x, y, r, col) {
   ctx.save(); ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.beginPath();
@@ -1042,84 +1065,129 @@ function drawDisclaimer() {
 function drawEffects(now) {
   // 碰撞接缝闪光：沿两牌接触线的一道白色光带，约 220 ms 淡出
   G.seams = (G.seams || []).filter(f => {
-    const k = (now - f.t0) / 240; if (k >= 1) return false;
-    const a = f.a * (1 - k) * (k < 0.15 ? k / 0.15 : 1), gw = f.w * (0.16 + 0.25 * k);
-    ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createLinearGradient(f.x - gw, 0, f.x + gw, 0);
-    g.addColorStop(0, 'rgba(255,255,220,0)'); g.addColorStop(0.5, `rgba(255,255,230,${a})`); g.addColorStop(1, 'rgba(255,255,220,0)');
-    ctx.fillStyle = g; ctx.fillRect(f.x - gw, f.y - f.h * 0.55, gw * 2, f.h * 1.1);
-    const r = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.h * (0.35 + 0.4 * k));
-    r.addColorStop(0, `rgba(255,255,235,${a * 0.8})`); r.addColorStop(1, 'rgba(255,255,200,0)');
-    ctx.fillStyle = r; ctx.beginPath(); ctx.arc(f.x, f.y, f.h * (0.35 + 0.4 * k), 0, 7); ctx.fill();
-    ctx.restore(); return true;
+    const q = seamState(f, now); if (!q) return false;
+    drawSeam(f.x, f.y, f.h, q.gw, q.R, q.a);
+    return true;
   });
   // 闪光
   G.flashes = G.flashes.filter(f => {
-    const k = (now - f.t0) / 350; if (k >= 1) return false;
-    const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * (1 + k));
-    const c = hexRgb(S.particleColor2);
-    g.addColorStop(0, `rgba(255,255,220,${0.8 * (1 - k)})`); g.addColorStop(0.4, `rgba(${c.join(',')},${0.5 * (1 - k)})`); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (1 + k), 0, 7); ctx.fill(); return true;
+    const q = flashState(f, now); if (!q) return false;
+    drawFlash(f.x, f.y, q.r, q.a); return true;
   });
+  drawParticlesAndRipples(now);
+}
+function seamState(f, now) {
+  const k = (now - f.t0) / 240; if (k >= 1) return null;
+  return { x: f.x, y: f.y, h: f.h, a: f.a * (1 - k) * (k < 0.15 ? k / 0.15 : 1), gw: f.w * (0.16 + 0.25 * k), R: f.h * (0.35 + 0.4 * k) };
+}
+function flashState(f, now) { const k = (now - f.t0) / 350; return k >= 1 ? null : { x: f.x, y: f.y, r: f.r * (1 + k), a: 1 - k }; }
+function drawSeam(x, y, h, gw, R, a) { drawSeamBand(x, y, h, gw, a); drawSeamGlow(x, y, R, a); }
+function drawSeamBand(x, y, h, gw, a) {
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createLinearGradient(x - gw, 0, x + gw, 0);
+  g.addColorStop(0, 'rgba(255,255,220,0)'); g.addColorStop(0.5, `rgba(255,255,230,${a})`); g.addColorStop(1, 'rgba(255,255,220,0)');
+  ctx.fillStyle = g; ctx.fillRect(x - gw, y - h * 0.55, gw * 2, h * 1.1);
+  ctx.restore();
+}
+function drawSeamGlow(x, y, R, a) {
+  const r = ctx.createRadialGradient(x, y, 0, x, y, R);
+  r.addColorStop(0, `rgba(255,255,235,${a * 0.8})`); r.addColorStop(1, 'rgba(255,255,200,0)');
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = r; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill(); ctx.restore();
+}
+function drawFlash(x, y, rad, a) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+  const c = hexRgb(S.particleColor2);
+  g.addColorStop(0, `rgba(255,255,220,${0.8 * a})`); g.addColorStop(0.4, `rgba(${c.join(',')},${0.5 * a})`); g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
+}
+function drawParticlesAndRipples(now) {
   // 树叶粒子
   G.particles = G.particles.filter(p => {
-    const k = (now - p.t0) / p.life; if (k >= 1) return false;
-    const t = k * p.life / 1000;
-    const r = p.r0 + p.vr * t * (1 - k * 0.4), a = p.a + p.va * t * (1 - k * 0.5);
-    const x = p.cx + Math.cos(a) * r, y = p.cy + Math.sin(a) * r * 0.85 + k * k * p.s * 0.8;
-    ctx.save(); ctx.translate(x, y); ctx.rotate(a + Math.PI / 2 * Math.sign(p.va) + p.rot + p.vrot * t * 0.3);
-    ctx.globalAlpha = Math.min(1, k * 6) * (k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35);
+    const q = particleState(p, now); if (!q) return false;
+    ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.rot);
+    ctx.globalAlpha = q.alpha;
     drawLeaf(p.s, p.s * 0.28, p.col);
     ctx.restore(); return true;
   });
   // 点击波纹
   G.ripples = G.ripples.filter(r => {
-    const k = (now - r.t0) / S.rippleDuration; if (k >= 1) return false;
-    const R = W * S.rippleSize * (0.25 + easeOut(k) * 0.75);
-    ctx.save(); ctx.globalAlpha = 1 - k; ctx.strokeStyle = S.rippleColor; ctx.lineWidth = S.rippleWidth * U * (1 - k * 0.5);
-    ctx.beginPath(); ctx.arc(r.x, r.y, R, 0, 7); ctx.stroke();
-    ctx.globalAlpha = (1 - k) * 0.25; ctx.fillStyle = S.rippleColor; ctx.fill();
-    ctx.restore(); return true;
+    const q = rippleState(r, now); if (!q) return false;
+    drawRipple(q.x, q.y, q.R, q.lw, q.alpha);
+    return true;
   });
 }
-function drawHand() {
-  if (!IMG.handImage || HAND.alpha <= 0.01) return;
-  const im = IMG.handImage;
-  const w = W * S.handSize, h = w * im.height / im.width;
-  const ax = S.handAnchorX * w, ay = S.handAnchorY * h;
+function particleState(p, now) {
+  const k = (now - p.t0) / p.life; if (k >= 1) return null;
+  const t = k * p.life / 1000;
+  const r = p.r0 + p.vr * t * (1 - k * 0.4), a = p.a + p.va * t * (1 - k * 0.5);
+  const x = p.cx + Math.cos(a) * r, y = p.cy + Math.sin(a) * r * 0.85 + k * k * p.s * 0.8;
+  return { x, y, rot: a + Math.PI / 2 * Math.sign(p.va) + p.rot + p.vrot * t * 0.3, alpha: Math.max(0, Math.min(1, k * 6) * (k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35)) };
+}
+function rippleState(r, now) {
+  const k = (now - r.t0) / S.rippleDuration; if (k >= 1) return null;
+  return { x: r.x, y: r.y, R: W * S.rippleSize * (0.25 + easeOut(k) * 0.75), lw: S.rippleWidth * U * (1 - k * 0.5), alpha: 1 - k };
+}
+function drawRipple(x, y, R, lw, alpha) {
+  ctx.save(); ctx.globalAlpha = alpha; ctx.strokeStyle = S.rippleColor; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.stroke();
+  ctx.globalAlpha = alpha * 0.25; ctx.fillStyle = S.rippleColor; ctx.fill();
+  ctx.restore();
+}
+function handState() {
+  if (!IMG.handImage || HAND.alpha <= 0.01) return null;
+  const im = IMG.handImage, w = W * S.handSize, h = w * im.height / im.width;
   const p = HAND.press * S.pressDepth;
-  ctx.save(); ctx.globalAlpha = HAND.alpha;
-  ctx.translate(HAND.x, HAND.y + p * h * 0.15);
-  ctx.rotate(S.handRotation * Math.PI / 180);
-  ctx.scale((S.handFlip ? -1 : 1) * (1 - p * 0.5), 1 - p * 0.6);
-  ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 18 * U; ctx.shadowOffsetX = 8 * U * (1 - HAND.press); ctx.shadowOffsetY = 10 * U * (1 - HAND.press);
-  ctx.drawImage(im, -ax, -ay, w, h);
+  return { x: HAND.x, y: HAND.y + p * h * 0.15, rot: S.handRotation, sx: (S.handFlip ? -1 : 1) * (1 - p * 0.5), sy: 1 - p * 0.6, alpha: HAND.alpha, press: HAND.press, w, h };
+}
+// asset：传入固定状态（导出 AE 素材时在原点绘制、未按下）
+function drawHand(asset = null) {
+  const q = asset || handState(); if (!q) return;
+  const im = IMG.handImage;
+  const ax = S.handAnchorX * q.w, ay = S.handAnchorY * q.h;
+  ctx.save(); ctx.globalAlpha = q.alpha;
+  ctx.translate(q.x, q.y);
+  ctx.rotate(q.rot * Math.PI / 180);
+  ctx.scale(q.sx, q.sy);
+  ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 18 * U; ctx.shadowOffsetX = 8 * U * (1 - q.press); ctx.shadowOffsetY = 10 * U * (1 - q.press);
+  ctx.drawImage(im, -ax, -ay, q.w, q.h);
   ctx.restore();
 }
 function endButtonRect() { return { x: W / 2, y: H * 0.69, w: W * 0.62, h: H * 0.082 }; }
-function drawEndCard(now) {
-  if (!S.endCard || !G.cleared) return;
-  const el = now - G.clearT - S.endDelay; if (el < 0) return;
-  const a = Math.min(1, el / 450);
+function endCardState(now) {
+  if (!S.endCard || !G || !G.cleared) return null;
+  const el = now - G.clearT - S.endDelay; if (el < 0) return null;
+  return { el, a: Math.min(1, el / 450), icon: 0.85 + 0.15 * easeBack(Math.min(1, el / 500)), pul: 1 + 0.04 * Math.sin(el / 160) };
+}
+// part：'all' | 'bg' | 'glow' | 'icon' | 'title' | 'button'（导出 AE 时分部件绘制，部件模式下不做淡入/缩放/闪烁）
+function drawEndCard(now, part = 'all') {
+  const P = x => part === 'all' || part === x;
+  let el, a;
+  if (part === 'all') { const q = endCardState(now); if (!q) return; el = q.el; a = q.a; } else { el = 1e9; a = 1; }
   ctx.save(); ctx.globalAlpha = a;
+  if (P('bg')) {
   const g = ctx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.45, H * 0.7);
   g.addColorStop(0, S.endBg1); g.addColorStop(1, S.endBg2); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   // 顶部挂灯与星星（视频结束页同款）
   ctx.save(); ctx.strokeStyle = 'rgba(255,230,150,.35)'; ctx.lineWidth = 1.2 * U;
   for (const [x1, x2, sag] of [[-0.05, 0.55, 0.06], [0.45, 1.05, 0.07], [0.1, 0.9, 0.11]]) {
     ctx.beginPath(); ctx.moveTo(W * x1, 0); ctx.quadraticCurveTo(W * (x1 + x2) / 2, H * sag * 2, W * x2, 0); ctx.stroke();
-    for (let k = 1; k < 12; k++) { const tt = k / 12, x = lerp(W * x1, W * x2, tt), y = H * sag * 2 * 2 * tt * (1 - tt); ctx.fillStyle = `rgba(255,236,170,${0.5 + 0.5 * Math.sin(el / 200 + k)})`; ctx.beginPath(); ctx.arc(x, y, 2 * U, 0, 7); ctx.fill(); }
+    for (let k = 1; k < 12; k++) { const tt = k / 12, x = lerp(W * x1, W * x2, tt), y = H * sag * 2 * 2 * tt * (1 - tt); ctx.fillStyle = `rgba(255,236,170,${part === 'all' ? 0.5 + 0.5 * Math.sin(el / 200 + k) : 0.75})`; ctx.beginPath(); ctx.arc(x, y, 2 * U, 0, 7); ctx.fill(); }
   }
   for (const [x, len] of [[0.06, 0.2], [0.14, 0.13], [0.92, 0.2], [0.96, 0.08]]) {
     ctx.beginPath(); ctx.moveTo(W * x, 0); ctx.lineTo(W * x, H * len); ctx.stroke(); star(W * x, H * len + 8 * U, 11 * U, '#f5d36b');
   }
   ctx.restore();
+  }
   // 图标背后的光晕
-  const gy = H * 0.3, hg = ctx.createRadialGradient(W / 2, gy, 0, W / 2, gy, W * 0.42);
+  const gy = H * 0.3;
+  if (P('glow')) {
+  const hg = ctx.createRadialGradient(W / 2, gy, 0, W / 2, gy, W * 0.42);
   hg.addColorStop(0, 'rgba(255,255,170,.75)'); hg.addColorStop(0.45, 'rgba(200,255,120,.25)'); hg.addColorStop(1, 'rgba(200,255,120,0)');
   ctx.fillStyle = hg; ctx.fillRect(0, gy - W * 0.45, W, W * 0.9);
+  }
   // 图标
-  const s = W * 0.41 * (0.85 + 0.15 * easeBack(Math.min(1, el / 500))), ix = W / 2 - s / 2, iy = gy - s / 2;
+  if (P('icon')) {
+  const s = W * 0.41 * (part === 'all' ? 0.85 + 0.15 * easeBack(Math.min(1, el / 500)) : 1), ix = W / 2 - s / 2, iy = gy - s / 2;
   ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 24 * U; ctx.shadowOffsetY = 8 * U;
   rr(ctx, ix, iy, s, s, s * 0.2); const bgd = ctx.createLinearGradient(0, iy, 0, iy + s); bgd.addColorStop(0, '#ffe58a'); bgd.addColorStop(1, '#b8801e'); ctx.fillStyle = bgd; ctx.fill(); ctx.restore();
   ctx.save(); rr(ctx, ix + s * 0.03, iy + s * 0.03, s * 0.94, s * 0.94, s * 0.18); ctx.clip();
@@ -1140,14 +1208,20 @@ function drawEndCard(now) {
     ctx.fillStyle = '#ffe14d'; ctx.font = `900 ${s * 0.16}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('cash', ix + s / 2, iy + s * 0.9);
   }
   ctx.restore();
+  }
   // 标题：金色渐变 + 深红描边
   const ty = H * 0.53;
+  if (P('title')) {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.font = `900 ${W * 0.105}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round'; ctx.strokeStyle = '#7a1d0c'; ctx.lineWidth = W * 0.02; ctx.strokeText(S.endTitle, W / 2, ty + 3 * U);
   const tg = ctx.createLinearGradient(0, ty - W * 0.05, 0, ty + W * 0.05); tg.addColorStop(0, '#fff6b0'); tg.addColorStop(0.5, S.endTitleColor); tg.addColorStop(1, '#e08a12');
   ctx.fillStyle = tg; ctx.fillText(S.endTitle, W / 2, ty);
+  }
   // 按钮
-  const b = endButtonRect(), pul = 1 + 0.04 * Math.sin(el / 160);
+  if (P('button')) {
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const b = endButtonRect(), pul = part === 'all' ? 1 + 0.04 * Math.sin(el / 160) : 1;
   ctx.save(); ctx.translate(b.x, b.y); ctx.scale(pul, pul);
   ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 16 * U; ctx.shadowOffsetY = 6 * U;
   const bg = ctx.createLinearGradient(0, -b.h / 2, 0, b.h / 2); bg.addColorStop(0, shade(S.endBtnColor, 1.25)); bg.addColorStop(1, shade(S.endBtnColor, 0.75));
@@ -1156,16 +1230,20 @@ function drawEndCard(now) {
   ctx.fillStyle = 'rgba(255,255,255,.28)'; rr(ctx, -b.w / 2 + b.h * 0.25, -b.h / 2 + b.h * 0.1, b.w - b.h * 0.5, b.h * 0.32, b.h * 0.16); ctx.fill();
   ctx.fillStyle = '#fff'; ctx.font = `bold ${b.h * 0.45}px "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif`; ctx.fillText(S.endButton, 0, 2 * U);
   ctx.restore();
+  }
   ctx.restore();
 }
 
 // 开场时棋盘整体压暗（视频 0.5s 起变暗，字母出完后恢复）
-function drawIntroDim(now) {
-  if (!S.introWord || !G || S.introDim <= 0) return;
+function introDimState(now) {
+  if (!S.introWord || !G || S.introDim <= 0) return 0;
   const el = (now - G.introT0) / 1000, st = S.introDelay, end = S.introDelay + S.introDuration;
-  if (el < st || el > end + 0.3) return;
-  const a = el < st + 0.15 ? (el - st) / 0.15 : el < end ? 1 : 1 - (el - end) / 0.3;
-  ctx.fillStyle = `rgba(0,0,0,${S.introDim * a})`; ctx.fillRect(VP.x, VP.y, VP.w, VP.h);
+  if (el < st || el > end + 0.3) return 0;
+  return S.introDim * (el < st + 0.15 ? (el - st) / 0.15 : el < end ? 1 : 1 - (el - end) / 0.3);
+}
+function drawIntroDim(now) {
+  const a = introDimState(now); if (a <= 0) return;
+  ctx.fillStyle = `rgba(0,0,0,${a})`; ctx.fillRect(VP.x, VP.y, VP.w, VP.h);
 }
 let lastFrame = performance.now();
 function frame() {
@@ -1212,6 +1290,7 @@ function frame() {
   if (G) drawEndCard(now);
   drawHand();
   if (REC.rec) updateRecTime();
+  if (AE.active()) { AE.sample(now); updateAEButtons(); }
   requestAnimationFrame(frame);
 }
 
@@ -1298,8 +1377,8 @@ function buildPanel() {
       } else if (it.type === 'textarea') {
         el = document.createElement('textarea'); el.rows = 2; el.oninput = () => onSetting(it, el.value); row.appendChild(el);
       } else if (it.type === 'button') {
-        el = document.createElement('button'); el.textContent = '▶ 试听';
-        el.onclick = () => { resumeAudio().then(() => SFX_NAMES.forEach((n, i) => setTimeout(() => sfx(n), i * 650))); };
+        el = document.createElement('button'); el.textContent = it.text || '▶ 试听'; if (it.action) el.id = 'btn_' + it.action;
+        el.onclick = it.action ? () => BUTTON_ACTIONS[it.action]() : () => { resumeAudio().then(() => SFX_NAMES.forEach((n, i) => setTimeout(() => sfx(n), i * 650))); };
         row.appendChild(el);
       } else if (it.type === 'file') {
         el = document.createElement('input'); el.type = 'file'; el.accept = 'image/*';
@@ -1407,8 +1486,81 @@ function showMigrationBanner() {
 }
 function applyAll() { saveSettings(); syncPanel(); ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg); setResolution(); newGame(true); }
 
+// ---------------- 导出 AE 工程 ----------------
+// 单张牌的“隔离渲染”：只显示这一张牌的指定部件，用真实 three.js 相机渲染一帧，裁出来作为 AE 素材（锚点=牌面中心）
+function isolateRender(t, o) {
+  const vis = G.tiles.map(x => x.obj.visible);
+  G.tiles.forEach(x => { x.obj.visible = false; });
+  t.obj.visible = true;
+  const ch = t.obj.children, cvis = ch.map(c => c.visible);
+  const [body, face, sh, ls] = ch;
+  body.visible = !!o.body; face.visible = !!o.face; sh.visible = !!o.sh; if (ls) ls.visible = !!o.ls;
+  const fm = t.mFace.map, fc = t.mFace.color.clone(), sc = t.mSlab.color.clone(), osc = t.obj.scale.clone();
+  t.obj.scale.set(1, 1, 1);
+  t.mFace.map = faceTexture(o.sel ? t.key + '#sel' : t.key);
+  if (o.black) { t.mFace.color.setRGB(0, 0, 0); t.mSlab.color.setRGB(0, 0, 0); }
+  else { t.mFace.color.setRGB(1, 1, 1); if (o.sel) t.mSlab.color.set(S.selectTint); else t.mSlab.color.setRGB(1, 1, 1); }
+  renderer.render(scene, camera);
+  const full = document.createElement('canvas'); full.width = VP.w; full.height = VP.h;
+  const g = full.getContext('2d'); g.drawImage(glCanvas, 0, 0, VP.w, VP.h);
+  // 还原
+  t.mFace.map = fm; t.mFace.color.copy(fc); t.mSlab.color.copy(sc); t.obj.scale.copy(osc);
+  ch.forEach((c, i) => { c.visible = cvis[i]; });
+  G.tiles.forEach((x, i) => { x.obj.visible = vis[i]; });
+  // 裁切
+  const p = tileScreen(t), cx = p.x - VP.x, cy = p.y - VP.y, R0 = Math.max(p.w, p.h) * 1.6;
+  const x0 = Math.max(0, Math.floor(cx - R0)), y0 = Math.max(0, Math.floor(cy - R0)), x1 = Math.min(VP.w, Math.ceil(cx + R0)), y1 = Math.min(VP.h, Math.ceil(cy + R0));
+  const d = g.getImageData(x0, y0, x1 - x0, y1 - y0), w = x1 - x0;
+  let bx0 = 1e9, by0 = 1e9, bx1 = -1, by1 = -1;
+  for (let y = 0; y < d.height; y++) for (let x = 0; x < w; x++) if (d.data[(y * w + x) * 4 + 3]) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+  if (bx1 < 0) { bx0 = by0 = 0; bx1 = by1 = 0; }
+  const out = document.createElement('canvas'); out.width = bx1 - bx0 + 1; out.height = by1 - by0 + 1;
+  out.getContext('2d').drawImage(full, -(x0 + bx0), -(y0 + by0));
+  return { canvas: out, ax: cx - (x0 + bx0), ay: cy - (y0 + by0) };
+}
+const AE = createAERecorder({
+  env: () => ({ S, G, W, H, U, VP, IMG, canvas }),
+  renderTile: (t, sel) => isolateRender(t, { body: true, face: true, sel }),
+  renderTileShared: t => ({ shadow: isolateRender(t, { sh: true }), sil: isolateRender(t, { body: true, face: true, black: true }), band: S.leftShadow > 0 ? isolateRender(t, { ls: true }) : null }),
+  tileScreen, particleState, rippleState, seamState, flashState, introLetterStates, introDimState, wordGlowState, endCardState, handState, endButtonRect,
+  withCtx(c2d, fn) { const old = ctx; ctx = c2d; try { fn(); } finally { ctx = old; } },
+  withTransform(x, y, fn) { ctx.save(); ctx.translate(x, y); try { fn(); } finally { ctx.restore(); } },
+  drawBackground, drawTopBar, drawDisclaimer, drawTile2D, drawLeaf, drawRipple, drawSeamBand, drawSeamGlow, drawFlash, star, drawWordGlowRing, drawEndCard, drawHand,
+});
+let aeLastRec = null;
+function aeStart(opt) { AE.start(opt); updateAEButtons(); toast('开始记录 AE 时间轴'); }
+async function aeStopAndExport() {
+  const rec = AE.stop(); updateAEButtons();
+  if (!rec || !rec.frames) { toast('没有记录到内容'); return null; }
+  aeLastRec = rec;
+  return aeExport(rec);
+}
+async function aeExport(rec = aeLastRec) {
+  if (!rec) { toast('请先记录一段（自动通关或手动游玩）'); return null; }
+  toast('正在生成 AE 工程包…');
+  try {
+    const r = await AE.exportZip(S, rec);
+    const url = URL.createObjectURL(r.blob);
+    const a = document.createElement('a'); a.href = url; a.download = r.name; document.body.appendChild(a); a.click(); a.remove();
+    window.__lastAEExport = { name: r.name, url, size: r.blob.size, stats: r.stats, snaps: r.snaps };
+    toast(`AE 工程已导出：${r.name}（${(r.blob.size / 1048576).toFixed(1)} MB，${r.stats.layers} 个图层）`);
+    return window.__lastAEExport;
+  } catch (e) { console.error(e); toast('导出失败：' + e.message); return null; }
+}
+const BUTTON_ACTIONS = {
+  aeToggle: () => AE.active() ? aeStopAndExport() : aeStart(),
+  aeExport: () => aeExport(),
+};
+function updateAEButtons() {
+  const b = document.getElementById('btn_aeToggle'); if (!b) return;
+  b.textContent = AE.active() ? `■ 停止并导出（${AE.elapsed().toFixed(1)}s）` : '● 开始记录';
+  b.classList.toggle('on', AE.active());
+}
+
 // 供测试/外部脚本使用
 window.__app = {
+  drawPart(c2d, fn, ...args) { const old = ctx; ctx = c2d; try { ({ drawEndCard, drawTopBar, drawBackground })[fn](...args); } finally { ctx = old; } },
+  AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
   newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
