@@ -74,7 +74,7 @@ check('自动通关点击也按下、无波纹', auto.maxP > 0.99 && auto.ripple
 // ---------- 设置迁移（v12 → v13） ----------
 const mig = async j => { await p.waitForTimeout(500); await p.evaluate(j => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify(j)), j); await p.reload(); await p.waitForTimeout(1500); return p.evaluate(() => ({ r: __app.S.tapRipple, b: __app.S.selectBorder, pe: __app.S.pressEnabled, ps: __app.S.pressScale, v: __app.S.settingsVersion, seed: __app.S.seed })); };
 let m = await mig({ settingsVersion: 12, theme: 'guofeng', seed: 42 });
-check('本地 v12 存档 → 新默认（无波纹/无描边/按下）并保留数值', !m.r && !m.b && m.pe && m.ps === 0.91 && m.v === 14 && m.seed === 42, m);
+check('本地 v12 存档 → 新默认（无波纹/无描边/按下）并保留数值', !m.r && !m.b && m.pe && m.ps === 0.91 && m.v === 15 && m.seed === 42, m);
 m = await mig({ settingsVersion: 12, rippleColor: '#ff0000' });
 check('本地 v12 自定义过波纹 → 保留波纹', m.r === true && !m.b, m);
 m = await p.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 12, seed: 7 })); return { r: __app.S.tapRipple, b: __app.S.selectBorder, pe: __app.S.pressEnabled, seed: __app.S.seed }; });

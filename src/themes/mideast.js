@@ -196,22 +196,40 @@ function logo(ctx, e) {
   goldWord(ctx, S.logoLine2, cx, ay + ah * 0.5, ah * 0.36, aw * 0.84, FONT_LOGO, { sx: 0.95 });
   goldWord(ctx, S.logoLine3, cx, ay + ah * 0.79, ah * 0.25, aw * 0.68, FONT_AR, { weight: 700, rtl: true });
 }
-// 粒子：金色闪光（m<0.38）+ 玫瑰花瓣
-function particle(ctx, len, wid, col, m) {
+// 粒子（v15）：金色四芒星闪光（m<0.375，3/8）+ 玫瑰花瓣（5/8），与国风树叶同一运动模型（旋涡/翻转/上扬下坠）
+function particleKind(m) { return m < 0.375 ? 'spark' : 'petal'; }
+function particle(ctx, len, wid, col, m, S = {}) {
+  const glow = S.particleGlow ?? 0.6, gold = S.particleColor3 || '#ffe08a';
   if (m < 0.375) { // 与 AE 导出的 8 档分桶边界一致
-    const r = len * 0.42;
-    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r); g.addColorStop(0, '#fffbe6'); g.addColorStop(0.35, '#ffd860'); g.addColorStop(1, 'rgba(230,160,30,.9)');
-    ctx.fillStyle = g; star(ctx, 0, 0, r, r * 0.22, 4, 0); ctx.fill();
-    ctx.fillStyle = 'rgba(255,240,180,.6)'; star(ctx, 0, 0, r * 0.6, r * 0.12, 4, Math.PI / 4); ctx.fill();
+    const r = len * 0.5;
+    if (glow > 0) { // 柔光晕
+      const h = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 1.25); h.addColorStop(0, `rgba(255,236,170,${0.55 * Math.min(1, glow)})`); h.addColorStop(1, 'rgba(255,200,80,0)');
+      ctx.fillStyle = h; ctx.beginPath(); ctx.arc(0, 0, r * 1.25, 0, 7); ctx.fill();
+    }
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r); g.addColorStop(0, '#fffdf0'); g.addColorStop(0.3, gold); g.addColorStop(1, 'rgba(214,140,20,.95)');
+    ctx.fillStyle = g; star(ctx, 0, 0, r, r * 0.16, 4, 0); ctx.fill();
+    ctx.fillStyle = 'rgba(255,246,200,.75)'; star(ctx, 0, 0, r * 0.55, r * 0.1, 4, Math.PI / 4); ctx.fill();
+    ctx.fillStyle = '#fffef6'; ctx.beginPath(); ctx.arc(0, 0, r * 0.12, 0, 7); ctx.fill();
     return;
   }
-  const w = wid * 1.45;
-  ctx.beginPath(); ctx.moveTo(-len / 2, 0);
-  ctx.bezierCurveTo(-len * 0.15, -w * 1.15, len * 0.42, -w * 1.05, len / 2, -w * 0.22);
-  ctx.quadraticCurveTo(len * 0.36, 0, len / 2, w * 0.22);
-  ctx.bezierCurveTo(len * 0.42, w * 1.05, -len * 0.15, w * 1.15, -len / 2, 0); ctx.closePath();
-  const g = ctx.createLinearGradient(-len / 2, 0, len / 2, 0); g.addColorStop(0, ART_shade(rgbHex(col), 0.75)); g.addColorStop(1, col); ctx.fillStyle = g; ctx.fill();
-  ctx.strokeStyle = 'rgba(255,220,230,.45)'; ctx.lineWidth = Math.max(1, wid * 0.12); ctx.beginPath(); ctx.moveTo(-len * 0.38, 0); ctx.quadraticCurveTo(0, -w * 0.2, len * 0.3, 0); ctx.stroke();
+  // 玫瑰花瓣：宽圆、外缘略有凹口、基部收窄；基部深红 → 外缘粉，外缘一道浅色高光，基部一条浅色瓣脉
+  const L = len / 2, w = len * 0.34, bend = (m - 0.7) * w * 0.6;
+  const path = () => {
+    ctx.beginPath(); ctx.moveTo(-L, bend * 0.2);
+    ctx.bezierCurveTo(-L * 0.55, -w * 0.95, L * 0.55, -w * 1.25 + bend, L * 0.92, -w * 0.32 + bend);
+    ctx.quadraticCurveTo(L * 0.78, bend * 0.6, L * 0.92, w * 0.32 + bend);
+    ctx.bezierCurveTo(L * 0.55, w * 1.25 + bend, -L * 0.55, w * 0.95, -L, bend * 0.2); ctx.closePath();
+  };
+  const base = ART_shade(rgbHex(col), 0.72);
+  const g = ctx.createRadialGradient(-L, 0, len * 0.05, -L * 0.2, 0, len * 1.05);
+  g.addColorStop(0, base); g.addColorStop(0.55, col); g.addColorStop(1, ART_shade(rgbHex(col), 1.35));
+  path(); ctx.fillStyle = g; ctx.fill();
+  ctx.save(); path(); ctx.clip();
+  ctx.strokeStyle = 'rgba(255,225,235,.55)'; ctx.lineWidth = Math.max(0.8, len * 0.035);
+  ctx.beginPath(); ctx.moveTo(L * 0.1, -w * 0.95 + bend); ctx.quadraticCurveTo(L * 0.85, -w * 0.7 + bend, L * 0.9, w * 0.1 + bend); ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(255,200,215,.35)'; ctx.lineWidth = Math.max(0.6, len * 0.02);
+  ctx.beginPath(); ctx.moveTo(-L * 0.85, bend * 0.2); ctx.quadraticCurveTo(-L * 0.1, bend * 0.5, L * 0.45, bend * 0.8); ctx.stroke();
 }
 function rgbHex(c) { const m = /^rgb\((\d+),(\d+),(\d+)\)$/.exec(c); return m ? '#' + [m[1], m[2], m[3]].map(v => (+v).toString(16).padStart(2, '0')).join('') : c; }
 
@@ -278,13 +296,13 @@ export const THEME = {
     logoLine1: 'Desert', logoLine2: 'DOMINO', logoLine3: 'دومينو الصحراء', logoRibbon: false, logoDeco: true,
     disclaimer: 'هذه اللعبة للترفيه فقط، ولا تتضمن أي مقامرة بأموال حقيقية أو جوائز، وقد يختلف محتوى اللعبة عن الإعلان.',
     disclaimerColor: '#f3e3b5', glowColor: '#ffd36b', seamColor: '#ffd36b', rippleColor: '#ffd36b',
-    particleColor: '#a8102f', particleColor2: '#ff8fa6', particleCount: 14,
+    particleColor: '#a50f2d', particleColor2: '#ff7f99', particleColor3: '#ffe08a', particleCount: 36, particleGlow: 0.6, particleSizeMin: 0.2, particleSizeMax: 0.5,
     endTitle: 'Desert Domino', endButton: 'تحميل سريع', endButton2: 'DOWNLOAD NOW', endBg1: '#1d3f86', endBg2: '#060b22', endBtnColor: '#e0a22a', endTitleColor: '#ffd36b',
     sfxScale: 'hijaz', bgPattern: 0.12, bgSkyline: true, bgLanterns: true, bgBoardDim: 0.5,
   },
   fonts: { disclaimer: FONT_AR, title: FONT_AR, titleWeight: 700, rtl: true },
   flashColor: '#ffc94a',
   endGlow: ['rgba(255,225,140,.7)', 'rgba(255,190,80,.22)', 'rgba(255,190,80,0)'],
-  drawFace, faceBg, background, topBar, slot, logo, particle, endBg, endIcon, endButtonText,
+  drawFace, faceBg, background, topBar, slot, logo, particle, particleKind, endBg, endIcon, endButtonText,
 };
 export const ICON_NAMES = ART.ICON_NAMES;

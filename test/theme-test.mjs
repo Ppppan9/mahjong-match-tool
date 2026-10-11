@@ -58,7 +58,7 @@ const p = await realClock();
 await p.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 11, topBarColor: '#224466', logoLine1: 'Hello', bgColor: '#101010', seed: 77, layers: 4 })));
 await p.reload(); await p.waitForTimeout(1500);
 const leg = await p.evaluate(() => ({ theme: __app.theme, v: __app.S.settingsVersion, top: __app.S.topBarColor, l1: __app.S.logoLine1, bg: __app.S.bgColor, seed: __app.S.seed, layers: __app.S.layers, sel: [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'mideast'))?.value }));
-check('旧存档无 theme → 国风并保留数值', leg.theme === 'guofeng' && leg.v === 14 && leg.top === '#224466' && leg.l1 === 'Hello' && leg.bg === '#101010' && leg.seed === 77 && leg.layers === 4 && leg.sel === 'guofeng', leg);
+check('旧存档无 theme → 国风并保留数值', leg.theme === 'guofeng' && leg.v === 15 && leg.top === '#224466' && leg.l1 === 'Hello' && leg.bg === '#101010' && leg.seed === 77 && leg.layers === 4 && leg.sel === 'guofeng', leg);
 await p.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ seed: 5 })));
 await p.reload(); await p.waitForTimeout(1200);
 check('最旧存档（无版本号）→ 国风', await p.evaluate(() => __app.theme === 'guofeng' && __app.S.seed === 5));

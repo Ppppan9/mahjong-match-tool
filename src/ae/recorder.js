@@ -85,7 +85,7 @@ export function createAERecorder(api) {
         const id = idOf(p);
         let tr = R.parts.get(id);
         if (!tr) { tr = { id, burst: Math.round(p.t0) + '_' + Math.round(p.cx) + '_' + Math.round(p.cy), s0: p.s, m: p.m ?? 0, s: [] }; R.parts.set(id, tr); }
-        tr.s.push([t, q.x, q.y, q.rot * 180 / Math.PI, q.alpha]);
+        tr.s.push([t, q.x, q.y, q.rot * 180 / Math.PI, q.alpha, r3(q.sx ?? 1), r3(q.sy ?? 1)]); // 逐帧烘焙；sy 为沿叶长轴的 3D 翻滚（余弦过零），sx 为次轴轻微摆动
       }
       const simple = (list, map, fn) => { for (const o of list || []) { const q = fn(o, now); if (!q) continue; const id = idOf(o); let tr = map.get(id); if (!tr) { tr = { id, s: [] }; map.set(id, tr); } tr.s.push([t, ...q]); } };
       simple(G.ripples, R.ripples, (o, n) => { const q = api.rippleState(o, n); return q && [q.x, q.y, q.R, q.alpha]; });
@@ -199,11 +199,11 @@ export function createAERecorder(api) {
       const a = local('sprite_' + safe(key) + (tint ? '_sel' : ''), 'sprites', RW * 1.9, RH * 1.9, (cx, cy) => api.drawTile2D(key, cx, cy, RW, RH, 1, tint));
       spriteAsset.set(k, a); return a;
     }
-    const LEAF_N = 8, LR = 100;
+    const LEAF_N = 8, LR = 160; // 粒子按 m 分 8 档（与画面贴图同一外形/色档）；素材按 160 px 长渲染，放大不糊
     const leafA = []; if (S.aeLeaves !== 'off' && rec.parts.size) for (let i = 0; i < LEAF_N; i++) {
       const c1 = hex(S.particleColor), c2 = hex(S.particleColor2), m = (i + 0.5) / LEAF_N;
       const col = `rgb(${c1.map((v, k) => Math.round(v + (c2[k] - v) * m)).join(',')})`;
-      leafA.push(local('leaf_' + i, 'fx', LR * 1.3, LR * 1.3, (cx, cy) => api.withTransform(cx, cy, () => api.drawLeaf(LR, LR * 0.28, col, m))));
+      leafA.push(local('leaf_' + i, 'fx', LR * 1.4, LR * 1.4, (cx, cy) => api.withTransform(cx, cy, () => api.drawLeaf(LR, LR * (S.particleAspect || 0.28), col, m))));
     }
     const RR = 100, Rmid = W * S.rippleSize * 0.906, LWa = S.rippleWidth * U * 0.75 * RR / Math.max(1, Rmid);
     if (rec.ripples.size) A.ripple = local('ripple', 'fx', RR * 2 + LWa * 2 + 6, RR * 2 + LWa * 2 + 6, (cx, cy) => api.drawRipple(cx, cy, RR, LWa, 1));
@@ -384,7 +384,7 @@ export function createAERecorder(api) {
         bi++;
         const ls = list.map((tr, i) => {
           const a = leafA[Math.min(LEAF_N - 1, Math.floor(tr.m * LEAF_N))], fr = frames(tr.s), s = tr.s0 / LR * 100 * K;
-          return L(N(`树叶 ${bi}-${i + 1}`, `Leaf ${bi}-${i + 1}`), { asset: a.id }, { in: fr.in, out: fr.out, label: LABEL.leaf, tr: { anchor: [a.ax, a.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: [s, s], rotation: prop(fr, v => v[3], TOL.rot), opacity: prop(fr, v => v[4] * 100, TOL.op) } });
+          return L(N(`树叶 ${bi}-${i + 1}`, `Leaf ${bi}-${i + 1}`), { asset: a.id }, { in: fr.in, out: fr.out, label: LABEL.leaf, tr: { anchor: [a.ax, a.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [(v[5] ?? 1) * s, (v[6] ?? 1) * s], TOL.scale), rotation: prop(fr, v => v[3], TOL.rot), opacity: prop(fr, v => v[4] * 100, TOL.op) } });
         });
         if (S.aeLeaves === 'precomp') {
           const c = compDef('burst_' + bi, N('树叶爆开 #', 'Leaf burst #') + bi, ls);

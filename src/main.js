@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { DEFAULTS, SCHEMA } from './settings.js';
-import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
+import { drawFaceCanvas, roundRect as rr, shade, hexRgb, decoyLetterKeys } from './faces.js';
 import { loadFonts, FONT_LOGO, FONT_AR } from './fonts.js';
 import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 14;
+const SETTINGS_VERSION = 15;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -92,6 +92,12 @@ function migrate(j, fromStorage = false) {
   }
   // v14：自动通关默认不再自动开始录制。本地旧存档里的 autoRec 一直是旧默认值 true → 改为 false；导入的 JSON 保留其值
   if (fromStorage && (j.settingsVersion || 1) < 14 && j.autoRec === true) j.autoRec = false;
+  // v15：碰撞粒子按参考重做。本地旧存档里仍是旧默认值的粒子参数 → 用新默认（主题各自的默认）；自定义值与导入的 JSON 保留
+  if (fromStorage && (j.settingsVersion || 1) < 15) {
+    const OLD_P = { particleColor: ['#2e7d32', '#a8102f'], particleColor2: ['#7cc576', '#ff8fa6'], particleCount: [12, 14], particleSize: [1.4, 1], particleSpeed: [1] };
+    const clean = o => { if (o) for (const [k, olds] of Object.entries(OLD_P)) if (k in o && olds.some(v => String(v).toLowerCase() === String(o[k]).toLowerCase())) delete o[k]; };
+    clean(j); if (j.themeStore && typeof j.themeStore === 'object') Object.values(j.themeStore).forEach(clean);
+  }
   // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）
   if (!j.theme || !THEMES[j.theme]) j.theme = 'guofeng';
   if (!j.themeStore || typeof j.themeStore !== 'object' || Array.isArray(j.themeStore)) j.themeStore = {};
@@ -619,7 +625,7 @@ async function burstPair(sps, mx, my, key, w) {
   const n = sps.length, hh = sps[0].h * sps[0].scale;
   if (S.impactFlash > 0) for (let i = 1; i < n; i++) G.seams.push({ x: mx + (i - n / 2) * w, y: my, h: hh, w, t0: performance.now(), a: S.impactFlash });
   if (S.impactShake > 0) G.shake = { t0: performance.now(), amp: S.impactShake * U };
-  spawnParticles(mx, my, w * n * 0.6, true);
+  if (S.decoyParticles || isTarget(key) || !decoyLetterKeys(S).includes(key)) spawnParticles(mx, my, w * n / 2, true, 1, w); // 参考：干扰字母（T）消除时没有树叶
   const b = S.burstDuration;
   const s0 = sps.map(s => s.scale), x0 = sps.map(s => s.x);
   const order = sps.map((s, i) => i).sort((p, q) => x0[p] - x0[q]);
@@ -659,7 +665,7 @@ function letterToSlot(key, x, y, w) {
   (S.letterFlyDuration > 0 ? moveSprite(sp, to, S.letterFlyDuration, easeOut) : Promise.resolve()).then(() => {
     entry.arrived = true; sp.z = 0; sp.moving = false;
     sp.scale = 1.35; tween(260, k => { sp.scale = lerp(1.35, 1, k); }, easeBack);
-    spawnParticles(to.x, to.y, to.w * 1.1, true, 0.6);
+    spawnParticles(to.x, to.y, to.w * 0.6, true, S.slotParticleScale, to.w);
     sfx('Letter');
     G.letterCount++;
     if (G.letterCount >= G.word.length) { G.wordDoneT = performance.now(); sfx('Word', { delay: 0.25 }); }
@@ -668,7 +674,7 @@ function letterToSlot(key, x, y, w) {
 }
 function burstSprite(sp) {
   sfx('Burst', { vol: 0.7 });
-  spawnParticles(sp.x, sp.y, sp.w * sp.scale, true, 0.6);
+  spawnParticles(sp.x, sp.y, sp.w * sp.scale * 0.6, true, S.slotParticleScale, sp.w * sp.scale);
   const s0 = sp.scale;
   tween(220, k => { sp.scale = s0 * (1 - 0.5 * k); sp.alpha = 1 - k; if (k >= 1) removeSprite(sp); }, easeIn);
 }
@@ -725,30 +731,100 @@ function shake(t) {
   const x0 = t.obj.position.x;
   tween(300, k => { t.obj.position.x = x0 + Math.sin(k * 30) * 0.05 * (1 - k); }, x => x);
 }
-// 绿叶粒子：细长尖叶，绕中心旋转并向外散开（视频同款）
-function spawnParticles(x, y, size, swirl = true, countScale = 1) {
-  const n = Math.round(S.particleCount * countScale);
+// ---------------- 碰撞粒子（v15，按参考视频逐帧实测，见 ref/ANALYSIS.md 第十轮） ----------------
+// 国风：约 32 片细长尖叶（柳叶/竹叶形，深绿/中绿/浅黄绿三档双色叶面 + 浅色叶脉 + 一侧高光边），
+// 在两牌周围一次性爆出（约 2 帧内全部出现），绕竖直轴旋涡式向外扩散、上扬后下坠，
+// 叶片在平面内自转并像翻滚的纸片一样 3D 翻转（scale-x 余弦摆动，经过 0 时只剩一条细线），
+// 越往后越小、最后 30% 淡出，寿命约 0.75 s。中东风：金色星形闪光 + 玫瑰花瓣，同一运动模型。
+// 绘制：每种外形（m 分 8 档）预渲染成离屏贴图，逐粒子 drawImage（批量贴图，100+ 粒子也保持 60 fps），
+// AE 导出用同一贴图做素材、每片一层（位置/旋转/缩放/不透明度关键帧），画面与导出一致。
+const LEAF_BUCKETS = 8, LEAF_RES = 100;
+const leafSpriteCache = new Map();
+const pBucket = () => (Math.floor(Math.random() * LEAF_BUCKETS) + 0.5) / LEAF_BUCKETS;
+function particleKind(m) { return THEME.particleKind ? THEME.particleKind(m) : 'leaf'; }
+function leafColor(m) {
   const c1 = hexRgb(S.particleColor), c2 = hexRgb(S.particleColor2);
-  const dir = Math.random() < 0.5 ? -1 : 1;
+  return `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`;
+}
+function particleSprite(m, back = false) {
+  const key = [THEME.id, m, back, S.particleColor, S.particleColor2, S.particleColor3, S.particleAspect, S.particleGlow, S.particleSoft].join('|');
+  let c = leafSpriteCache.get(key);
+  if (!c) {
+    if (leafSpriteCache.size > 64) leafSpriteCache.clear();
+    const pad = 1.3; c = document.createElement('canvas'); c.width = c.height = Math.ceil(LEAF_RES * pad * 2);
+    const g = c.getContext('2d'); g.translate(c.width / 2, c.height / 2); g.scale(2, 2);
+    const old = ctx; ctx = g; try { drawParticleShape(LEAF_RES, LEAF_RES * S.particleAspect, back ? shade(rgbToHex(leafColor(m)), 0.78) : leafColor(m), m); } finally { ctx = old; } // back：背面（翻过去的一面）略暗
+    leafSpriteCache.set(key, c);
+  }
+  return c;
+}
+// size：两牌半宽（云团半径基准），tileW：牌宽（叶长基准）
+function spawnParticles(x, y, size, swirl = true, countScale = 1, tileW = size) {
+  const n = Math.round(S.particleCount * countScale);
+  if (n <= 0) return;
+  const dir = Math.random() < 0.5 ? -1 : 1, now = performance.now(), sp = S.particleSpeed;
   for (let i = 0; i < n; i++) {
-    const m = Math.random();
+    const m = pBucket(), u = Math.random();
+    const len = tileW * S.particleSize * lerp(S.particleSizeMin, S.particleSizeMax, Math.pow(u, 1.6));
+    const a = (i / n) * Math.PI * 2 + rand(-0.35, 0.35);
     G.particles.push({
-      cx: x, cy: y, a: (i / n) * Math.PI * 2 + rand(-0.3, 0.3), r0: rand(0.15, 0.55) * size,
-      vr: rand(0.5, 1.3) * size * S.particleSpeed, va: dir * rand(2.5, 5) * S.particleSpeed,
-      rot: rand(0, 6.28), vrot: rand(-6, 6), s: rand(0.22, 0.36) * size * S.particleSize * (size > 0 ? 1 : 0),
-      m, col: `rgb(${c1.map((v, k) => Math.round(lerp(v, c2[k], m))).join(',')})`, t0: performance.now(), life: S.burstDuration * rand(0.75, 1.1),
+      cx: x, cy: y, a, m, s: len, R: size,
+      r0: Math.pow(Math.random(), 0.8) * 0.78 * size, // 出生在两牌范围内（不是只在接缝处），靠近两牌更密
+      dr: size * S.particleSpread * rand(0.35, 1.15),
+      va: (swirl ? dir : 0) * S.particleSwirl * rand(0.6, 1.25) * sp,
+      up: size * S.particleUp * rand(0.3, 1.2),
+      rot: rand(0, Math.PI * 2), vrot: rand(-1, 1) * S.particleSpin * sp,
+      fl: rand(0, Math.PI * 2), vfl: S.particleFlip * rand(0.6, 1.4) * Math.PI * 2 * sp * (Math.random() < 0.5 ? -1 : 1),
+      depth: rand(-1, 1), tw: tileW,
+      // 平滑“噪声”：每片固定的几组低频正弦（相位/频率在出生时定好，之后不再取随机数 → 任意帧率下都连续无跳变）
+      sw: [rand(0, 6.28), rand(0.75, 1.3), rand(0, 6.28), rand(0.4, 0.8)], wob: [rand(0, 6.28), rand(0.5, 1.1), rand(0.3, 1)],
+      col: leafColor(m), t0: now + Math.random() * S.particleEmit, life: S.particleLife * rand(0.72, 1.05) / Math.max(0.3, sp),
     });
   }
 }
-// 粒子外形随主题：国风=树叶，中东风=金色闪光+玫瑰花瓣（m 决定类型，AE 导出按 m 分 8 档取同一外形）
-function drawParticleShape(len, wid, col, m = 0.5) { if (THEME.particle) THEME.particle(ctx, len, wid, col, m); else drawLeaf(len, wid, col); }
-function drawLeaf(len, wid, col) {
-  ctx.fillStyle = col; ctx.beginPath();
-  ctx.moveTo(-len / 2, 0); ctx.quadraticCurveTo(0, -wid, len / 2, 0); ctx.quadraticCurveTo(0, wid, -len / 2, 0); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = Math.max(1, wid * 0.12);
-  ctx.beginPath(); ctx.moveTo(-len * 0.42, 0); ctx.lineTo(len * 0.42, 0); ctx.stroke();
+// 粒子外形随主题：国风=树叶，中东风=金色闪光+玫瑰花瓣（m 决定类型/色档，AE 导出按 m 分 8 档取同一贴图）
+function drawParticleShape(len, wid, col, m = 0.5) {
+  const soft = S.particleSoft || 0, oldF = ctx.filter; // 边缘柔化：贴图与 AE 素材同样生效
+  if (soft > 0) ctx.filter = `blur(${(len * 0.022 * soft).toFixed(2)}px)`;
+  try { drawParticleShapeRaw(len, wid, col, m); } finally { ctx.filter = oldF || 'none'; }
 }
-
+function drawParticleShapeRaw(len, wid, col, m) {
+  if (THEME.particle) { THEME.particle(ctx, len, wid, col, m, S); return; } // 主题自己处理辉光
+  const glow = S.particleGlow || 0;
+  if (glow > 0) { ctx.shadowColor = S.particleColor3 || '#ffffcc'; ctx.shadowBlur = len * 0.18 * glow; }
+  drawLeaf(len, wid, col, m);
+  ctx.shadowBlur = 0; ctx.shadowColor = 'transparent';
+}
+// 细长尖叶：叶柄端圆钝、叶尖细长，微弯；以叶脉为界两半深浅不同（一半受光一半背光），
+// 叶尖方向渐亮，浅色叶脉，受光一侧边缘一道细高光
+function drawLeaf(len, wid, col, m = 0.5) {
+  // 柔和版：不对称（一侧更宽）、整片微弯（弯曲的叶脉），无深色描边；两半明暗差小、整体略透
+  const L = len / 2, w = wid / 2 * 1.12, bend = (m - 0.5) * wid * 1.3 + wid * 0.18;
+  const base = hexRgb(rgbToHex(col)), hi = hexRgb(S.particleColor3 || '#b9e08a');
+  const mix = (c, d, t, a = 1) => `rgba(${c.map((v, k) => Math.round(lerp(v, d[k], t))).join(',')},${a})`;
+  const dark = base.map(v => v * 0.8);
+  const edgeU = () => { ctx.moveTo(-L, 0); ctx.bezierCurveTo(-L * 0.5, -w * 1.32, L * 0.3, -w * 1.0 + bend * 0.4, L, bend); };
+  const rib = () => ctx.quadraticCurveTo(0, bend * 0.75, -L, 0);
+  const upper = () => { ctx.beginPath(); edgeU(); rib(); ctx.closePath(); };
+  const lower = () => { ctx.beginPath(); ctx.moveTo(-L, 0); ctx.bezierCurveTo(-L * 0.5, w * 0.98, L * 0.3, w * 0.78 + bend * 0.4, L, bend); rib(); ctx.closePath(); };
+  // 受光半边：叶柄略深 → 叶尖浅黄绿
+  let g = ctx.createLinearGradient(-L, -w, L, w * 0.3);
+  g.addColorStop(0, mix(base, dark, 0.25, 0.95)); g.addColorStop(0.55, mix(base, hi, 0.08, 0.96)); g.addColorStop(1, mix(base, hi, 0.22, 0.92));
+  upper(); ctx.fillStyle = g; ctx.fill();
+  // 背光半边：只略深一点
+  g = ctx.createLinearGradient(-L, 0, L, 0);
+  g.addColorStop(0, mix(dark, [0, 0, 0], 0.08, 0.95)); g.addColorStop(1, mix(base, hi, 0.12, 0.93));
+  lower(); ctx.fillStyle = g; ctx.fill();
+  // 柔和高光：受光侧一条宽而淡的光带
+  ctx.save(); upper(); ctx.clip();
+  ctx.strokeStyle = mix(hi, [255, 255, 255], 0.1, 0.18); ctx.lineWidth = Math.max(0.8, wid * 0.22); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-L * 0.7, -w * 0.55); ctx.bezierCurveTo(-L * 0.3, -w * 0.9, L * 0.3, -w * 0.62 + bend * 0.4, L * 0.9, bend); ctx.stroke();
+  ctx.restore();
+  // 弯曲的淡色叶脉
+  ctx.strokeStyle = mix(hi, base, 0.35, 0.32); ctx.lineWidth = Math.max(0.6, wid * 0.05); ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-L * 0.92, 0); ctx.quadraticCurveTo(0, bend * 0.75, L * 0.88, bend * 0.97); ctx.stroke();
+}
+function rgbToHex(c) { const r = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(c); return r ? '#' + [r[1], r[2], r[3]].map(v => (+v).toString(16).padStart(2, '0')).join('') : c; }
 // ---------------- Hand ----------------
 const HAND = { x: 0, y: 0, press: 0, visible: false, alpha: 0 };
 function resetHand() { HAND.x = W * 0.82; HAND.y = H * 1.15; HAND.press = 0; }
@@ -1168,12 +1244,21 @@ function drawFlash(x, y, rad, a) {
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
 }
 function drawParticlesAndRipples(now) {
-  // 树叶粒子
+  // 粒子（贴图批量绘制）
+  const blur = S.particleBlur || 0, base = ctx.getTransform(); // 保留外层变换（震屏等）
   G.particles = G.particles.filter(p => {
+    if (now < p.t0) return true; // 还没到发射时刻
     const q = particleState(p, now); if (!q) return false;
-    ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.rot);
-    ctx.globalAlpha = q.alpha;
-    drawParticleShape(p.s, p.s * 0.28, p.col, p.m);
+    const k = p.s / LEAF_RES / 2;
+    const draw = (q, a) => {
+      const img = particleSprite(p.m, q.sy < 0), iw = img.width; // 叶宽过 0 的瞬间换成背面贴图（不可见切换）
+      ctx.setTransform(base); ctx.translate(q.x, q.y); ctx.rotate(q.rot); ctx.scale(q.sx * k, q.sy * k);
+      ctx.globalAlpha = a; ctx.drawImage(img, -iw / 2, -iw / 2);
+    };
+    ctx.save();
+    // 沿速度方向的运动模糊：取同一条轨迹上稍早的几个时刻（确定性，不引入随机）
+    if (blur > 0) { for (const [dt, w] of [[27, 0.22], [18, 0.3], [9, 0.4]]) { const g = particleState(p, now - dt); if (g) draw(g, g.alpha * blur * w); } }
+    draw(q, q.alpha);
     ctx.restore(); return true;
   });
   // 点击波纹
@@ -1183,12 +1268,46 @@ function drawParticlesAndRipples(now) {
     return true;
   });
 }
+// 粒子状态（画面与 AE 记录共用）：x,y 屏幕位置，rot 平面内旋转，sx/sy 缩放（sx 含 3D 翻转），alpha
+const smooth01 = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function particleState(p, now) {
+  if (p.vr !== undefined) return particleStateV14(p, now);
+  const age = now - p.t0; if (age < 0) return null;
+  const k = age / p.life; if (k >= 1) return null;
+  const t = age / 1000, T = p.life / 1000;
+  // 强 ease-out：出生瞬间“弹”出去，然后像羽毛一样慢慢飘（指数阻尼，drag 越大越早停下）
+  const d = Math.max(0.01, S.particleDrag), ease = x => (1 - Math.exp(-d * x)) / (1 - Math.exp(-d));
+  const e = ease(k);
+  const r = p.r0 + p.dr * e;
+  // 旋涡：角速度随阻尼衰减（角度 = 角速度的积分），路径是向外张开的弧线
+  const a = p.a + p.va * T * e * 0.85;
+  const z = Math.sin(a); // 绕竖直轴：z>0 朝向镜头（略大略亮）
+  // 轻柔摆动（垂直于径向的正弦飘动，随时间渐强），两组频率叠加避免机械感
+  const swA = (S.particleSwayAmp || 0) * p.tw * smooth01(0, 0.25, k), swF = (S.particleSwayFreq || 0) * Math.PI * 2;
+  const sway = swA * (Math.sin(p.sw[0] + swF * p.sw[1] * t) * 0.75 + Math.sin(p.sw[2] + swF * p.sw[3] * t * 1.7) * 0.25);
+  const nx = -Math.sin(a), ny = Math.cos(a) * 0.5;
+  const x = p.cx + Math.cos(a) * r + nx * sway;
+  const y = p.cy + p.depth * p.R * 0.7 * (0.75 + 0.5 * e) + z * r * 0.22 + ny * sway
+    - p.up * ease(Math.min(1, k * 1.25)) + S.particleGravity * p.R * k * k; // 先上扬（ease-out）后缓缓下坠
+  const persp = 1 + 0.16 * z;
+  const sc = smooth01(0, 0.06, k) * (1 - 0.45 * smooth01(0.2, 1, k)) * persp; // 平滑长出 → 渐小
+  const kind = particleKind(p.m);
+  // 平面自转：匀速 + 低频摆动；3D 翻滚：沿叶长轴翻面（叶宽按余弦变化，过 0 时只剩一条细线），频率带低频变化
+  const rot = p.rot + p.vrot * T * (0.35 + 0.65 * e) + 0.35 * Math.sin(p.wob[0] + p.wob[1] * 6.28 * t) * p.wob[2];
+  const ph = p.fl + p.vfl * t + 0.8 * Math.sin(p.wob[0] * 1.3 + p.wob[1] * 4.4 * t);
+  let sx, sy;
+  if (kind === 'spark') { const tw = 0.75 + 0.25 * Math.cos(ph); sx = sy = sc * tw; }
+  else { const c = Math.cos(ph); sx = sc * (0.88 + 0.12 * Math.cos(ph * 0.5 + p.wob[2] * 3)); sy = sc * Math.sign(c) * Math.pow(Math.abs(c), 0.6); } // |cos|^0.6：连续过 0，但正面朝镜头的时间更长（参考多数叶片可见叶面）
+  const alpha = smooth01(0, 0.04, k) * (1 - smooth01(0.7, 1, k)) * (0.86 + 0.14 * z) * (S.particleOpacity ?? 1);
+  return { x, y, rot, sx, sy, alpha: Math.max(0, alpha) };
+}
+// v14 及以前的粒子（旧录制数据兼容）
+function particleStateV14(p, now) {
   const k = (now - p.t0) / p.life; if (k >= 1) return null;
   const t = k * p.life / 1000;
   const r = p.r0 + p.vr * t * (1 - k * 0.4), a = p.a + p.va * t * (1 - k * 0.5);
   const x = p.cx + Math.cos(a) * r, y = p.cy + Math.sin(a) * r * 0.85 + k * k * p.s * 0.8;
-  return { x, y, rot: a + Math.PI / 2 * Math.sign(p.va) + p.rot + p.vrot * t * 0.3, alpha: Math.max(0, Math.min(1, k * 6) * (k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35)) };
+  return { x, y, rot: a + Math.PI / 2 * Math.sign(p.va) + p.rot + p.vrot * t * 0.3, sx: 1, sy: 1, alpha: Math.max(0, Math.min(1, k * 6) * (k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35)) };
 }
 function rippleState(r, now) {
   const k = (now - r.t0) / S.rippleDuration; if (k >= 1) return null;
@@ -1664,7 +1783,7 @@ window.__app = {
   AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
-  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
+  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, spawnParticles, particleState, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
 };
 
 buildPanel();

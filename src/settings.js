@@ -134,11 +134,33 @@ export const DEFAULTS = {
   selectBorder: false,
   burstDuration: 700,
   letterFlyDuration: 0,
-  particleColor: '#2e7d32',
-  particleColor2: '#7cc576',
-  particleCount: 12,
-  particleSize: 1.4,
-  particleSpeed: 1.0,
+  // v15 碰撞粒子（参考视频 11 次配对逐帧实测，见 ref/ANALYSIS.md 第十轮）
+  particleColor: '#25603a',   // 深绿（+200 ms 峰值帧实测：主色 #31833a~#3c8a2a，暗面 #1c4b43~#2a443a）
+  particleColor2: '#45a046',  // 中绿（饱和、偏亮）
+  particleColor3: '#a8dc7c',  // 叶尖/高光（实测最亮 #94cb76~#b9e08a）
+  particleCount: 36,          // 峰值帧可数 25~35 片（重叠/遮挡，略多于可数值）
+  particleSize: 1.0,          // 整体大小倍数
+  particleSizeMin: 0.2,       // 叶长（牌宽比例）最小
+  particleSizeMax: 0.72,      // 最大（实测中位 ≈0.3，最长 ≈0.85）
+  particleAspect: 0.36,       // 叶宽/叶长（正面卵状披针形 ≈1:2.5~1:3，侧翻时变细）
+  particleSpeed: 1.0,         // 整体速度倍数
+  particleSwirl: 2.4,         // 旋涡角速度(rad/s)
+  particleSpread: 0.62,       // 向外扩散距离(两牌半宽倍数)
+  particleUp: 0.55,           // 前段上扬幅度
+  particleGravity: 0.35,      // 后段下坠
+  particleSpin: 1.8,          // 平面内自转(rad/s)
+  particleFlip: 0.9,          // 3D 翻滚频率(次/秒)
+  particleDrag: 3.2,          // 减速（ease-out）强度：越大越快“弹出后飘”
+  particleSwayAmp: 0.12,      // 飘动摆幅(牌宽比例)
+  particleSwayFreq: 1.4,      // 飘动频率(Hz)
+  particleOpacity: 1,         // 叶片不透明度（贴图本身略透）
+  particleLife: 850,          // 寿命(ms)
+  particleEmit: 40,           // 发射持续(ms，参考约 2 帧内全部出现)
+  particleGlow: 0,            // 粒子辉光（参考国风没有）
+  particleSoft: 0.6,          // 叶片边缘柔化（参考边缘略软）
+  particleBlur: 0.5,          // 运动拖影（参考略有模糊）
+  slotParticleScale: 0.45,    // 托盘格字母弹出时的粒子数量比例
+  decoyParticles: false,      // 干扰字母（T）消除时也爆叶子（参考没有）
   // 音效（WebAudio 实时合成，无外部文件；录制时混入视频）
   sfxMute: false,
   sfxVolume: 0.7,
@@ -180,7 +202,7 @@ export const DEFAULTS = {
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
-  settingsVersion: 14,
+  settingsVersion: 15,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -372,11 +394,32 @@ export const SCHEMA = [
     B('selectBorder', '选中时牌面描绿边框（参考视频没有）', { kind: 'mesh' }),
     R('burstDuration', '汇合后停留+消失时长(ms)', 200, 2000, 10),
     R('letterFlyDuration', '字母飞入托盘时长(ms，0=直接在格子里弹出，视频)', 0, 1500, 10),
-    C('particleColor', '粒子颜色1'),
-    C('particleColor2', '粒子颜色2'),
-    R('particleCount', '粒子数量', 0, 80, 1),
-    R('particleSize', '粒子大小', 0.3, 3, 0.05),
-    R('particleSpeed', '粒子速度', 0.2, 3, 0.05),
+    C('particleColor', '粒子颜色1（深）'),
+    C('particleColor2', '粒子颜色2（浅）'),
+    C('particleColor3', '粒子高光/叶尖颜色'),
+    R('particleCount', '粒子数量（参考≈36）', 0, 200, 1),
+    R('particleSize', '粒子整体大小倍数', 0.3, 3, 0.05),
+    R('particleSizeMin', '粒子最小长度(牌宽比例)', 0.05, 1.5, 0.01),
+    R('particleSizeMax', '粒子最大长度(牌宽比例)', 0.05, 2, 0.01),
+    R('particleAspect', '叶片宽长比', 0.08, 0.8, 0.01),
+    R('particleSpeed', '粒子整体速度倍数', 0.2, 3, 0.05),
+    R('particleSwirl', '旋涡强度(rad/s)', 0, 8, 0.1),
+    R('particleSpread', '扩散距离(两牌半宽倍数)', 0, 3, 0.05),
+    R('particleUp', '前段上扬', 0, 1.5, 0.05),
+    R('particleGravity', '后段下坠', 0, 2, 0.05),
+    R('particleSpin', '平面自转速度(rad/s)', 0, 12, 0.1),
+    R('particleFlip', '3D 翻滚速度(次/秒)', 0, 8, 0.1),
+    R('particleDrag', '减速/ease-out 强度', 0, 10, 0.1),
+    R('particleSwayAmp', '飘动摆幅(牌宽比例)', 0, 0.6, 0.01),
+    R('particleSwayFreq', '飘动频率(Hz)', 0, 5, 0.05),
+    R('particleOpacity', '粒子不透明度', 0.2, 1, 0.01),
+    R('particleLife', '粒子寿命(ms)', 200, 2500, 10),
+    R('particleEmit', '发射持续时间(ms)', 0, 600, 5),
+    R('particleGlow', '粒子辉光', 0, 1.5, 0.05),
+    R('particleBlur', '运动拖影', 0, 1, 0.05),
+    R('particleSoft', '边缘柔化', 0, 2, 0.05),
+    R('slotParticleScale', '托盘格弹出粒子数量比例', 0, 2, 0.05),
+    B('decoyParticles', '干扰字母消除也爆粒子（参考没有）'),
   ]},
   { group: '音效', items: [
     B('sfxMute', '静音'),
