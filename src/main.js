@@ -6,7 +6,7 @@ import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from '
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 10;
+const SETTINGS_VERSION = 11;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -21,6 +21,7 @@ const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDurati
 // v6 默认（居中金字塔、较小的牌）；v7 起默认改回参考视频的同尺寸居中堆叠与取景
 const OLD_DEFAULTS_V6 = { insetX: [0.5], insetY: [0.5], boardScale: [0.86], boardOffsetY: [0.068], tileRatio: [1.18], gapY: [0.04] };
 // v7 默认（牌身细节/字色/顶栏在 v8 按参考视频逐像素校准）
+const OLD_DEFAULTS_V10 = { depthDarken: [0.12], shadowStrength: [0.8], shadowDX: [-0.1], shadowDY: [0.04], boardOffsetY: [0.062], stackGridRef: ['top'], baseCols: [6], insetX: [-1], insetY: [0], rowStagger: [0.5] };
 const OLD_DEFAULTS_V9 = { insetX: [0], shadowStrength: [0.5], shadowDX: [-0.07], shadowDY: [0.03] };
 const OLD_DEFAULTS_V7 = {
   baseRatio: [0.4], cornerRadius: [0.1], sideColor: ['#deded4'], baseColor: ['#3aa655'], sideRevealX: [0.035], sideRevealY: [0.09],
@@ -59,6 +60,9 @@ function migrate(j, fromStorage = false) {
   }
   if (fromStorage && (j.settingsVersion || 1) < 8) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V7)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) <= 10) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V10)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
   }
   if (fromStorage && (j.settingsVersion || 1) === 9) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V9)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
@@ -215,7 +219,11 @@ function shearK() {
 function layerComp(L) {
   if (S.stackMode === 'offset' || !S.revealCompensate) return { x: 0, y: 0 };
   const tw = G ? G.tw : 1, d = L - (BOUNDS ? BOUNDS.maxL : 0);
-  return { x: d * tw * (S.sideRevealX - (S.layerOffsetX || 0)), y: -d * tw * (S.sideRevealY - (S.layerOffsetY || 0)) };
+  // 金字塔 + ringBalance：每层外圈在屏幕上左右/上下等宽，各层（牌面+侧面）以同一中心叠放；
+  // 2.5D 的立体感由每张上层牌压在下层边圈上的白色侧面/绿色底边、阴影和逐层变暗体现
+  const bal = S.ringBalance && ((S.insetX || 0) > 0 || (S.insetY || 0) > 0);
+  const ox = bal ? 0 : (S.layerOffsetX || 0), oy = bal ? 0 : (S.layerOffsetY || 0);
+  return { x: d * tw * (S.sideRevealX - ox), y: -d * tw * (S.sideRevealY - oy) };
 }
 const wX = t => t.x + layerComp(t.layer).x, wY = t => t.y + layerComp(t.layer).y;
 function applyShear() {
@@ -282,11 +290,12 @@ function fitCamera() {
 let shadowTex = null;
 function makeShadowTex() {
   // 上层牌投到下层牌面上的柔和阴影（同层邻牌牌面更高，会挡住它；所以只在下层牌上看得见）
-  const c = document.createElement('canvas'); c.width = 128; c.height = Math.round(128 * S.tileRatio * 1.0);
-  const g = c.getContext('2d');
-  g.filter = 'blur(9px)';
+  const sp = Math.max(0.2, S.shadowSpread ?? 1), ex = 1 + 0.42 * sp, ey = 1 + 0.36 * sp;
+  const c = document.createElement('canvas'); c.width = 128; c.height = Math.round(128 * S.tileRatio * ey / ex);
+  const g = c.getContext('2d'), cw = 128 / ex, ch = c.height / ey, px = (128 - cw) / 2, py = (c.height - ch) / 2;
+  g.filter = `blur(${Math.max(2, Math.min(px, py) * 0.45).toFixed(1)}px)`;
   g.fillStyle = '#000';
-  rr(g, 20, 20, c.width - 40, c.height - 40, 14); g.fill();
+  rr(g, px, py, cw, ch, 14); g.fill();
   const t = new THREE.CanvasTexture(c); return t;
 }
 let leftShadowTex = null;
@@ -340,7 +349,7 @@ function buildMeshes() {
     for (let i = 0; i < pos.count; i++) { c.setStyle(sideGrad(1 - pos.getZ(i) / thick)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
     bodyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
   const faceGeo = new THREE.PlaneGeometry(tw * 0.995, th * 0.995); faceGeo.translate(0, 0, thick + 0.003);
-  const shGeo = new THREE.PlaneGeometry(tw * 1.42, th * 1.36);
+  const shSp = Math.max(0.2, S.shadowSpread ?? 1), shGeo = new THREE.PlaneGeometry(tw * (1 + 0.42 * shSp), th * (1 + 0.36 * shSp));
   // 向左投在相邻牌面上的柔和阴影（参考视频每张牌左侧邻牌的右缘都有一条渐暗带）
   const lsw = Math.max(0.001, S.leftShadowWidth) * tw;
   const lsGeo = new THREE.PlaneGeometry(lsw, th * 0.97); lsGeo.translate(-tw * 0.4975 - lsw / 2 + tw * 0.01, 0, thick + 0.006);
@@ -370,7 +379,7 @@ function refreshDark(instant) {
   const top = BOUNDS ? BOUNDS.maxL : 0;
   for (const t of G.tiles) {
     // 每低一层固定变暗一点（参考里露出的下层牌比顶层牌面暗 ~5%），被压住的再叠加 blockedDarken
-    const dd = Math.min(0.9, (top - t.layer) * (S.depthDarken || 0));
+    const dd = 1 - Math.pow(1 - Math.min(0.9, S.depthDarken || 0), top - t.layer); // 逐层相乘，层数多时最底层也不会全黑
     t.darkTarget = 1 - (1 - dd) * (1 - (isFree(t) ? 0 : S.blockedDarken)); if (instant) t.dark = t.darkTarget;
   }
   applyDark();

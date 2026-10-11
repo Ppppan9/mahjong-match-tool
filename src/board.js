@@ -15,9 +15,12 @@ export function layerGrids(S) {
   const out = [];
   if (S.stackMode !== 'offset') { // 居中金字塔：每往上一层每侧缩进 inset 张牌
     const N = Math.max(1, S.layers), dc = Math.round(2 * S.insetX), dr = Math.round(2 * S.insetY);
+    let bc = S.baseCols, br = S.baseRows;
+    // 金字塔：层数较多时自动加大底层，保证最高层至少 1×2（否则上面几层会被省略）
+    if (S.stackGridRef === 'base' && S.pyramidAutoGrow) { if (dc > 0) bc = Math.max(bc, dc * (N - 1) + 1); if (dr > 0) br = Math.max(br, dr * (N - 1) + 2); }
     for (let i = 0; i < N; i++) {
       const k = S.stackGridRef === 'base' ? -i : N - 1 - i; // 'top'：列/行数指顶层，下层逐层变大
-      const c = S.baseCols + k * dc, r = S.baseRows + k * dr;
+      const c = bc + k * dc, r = br + k * dr;
       if (c < 1 || r < 1) { if (S.stackGridRef === 'base') break; continue; } // 'top' 且下层变窄：太窄的底层直接省略
       out.push([c, r]);
     }
@@ -152,7 +155,9 @@ export function generateBoard(S) {
       }
       shuffle(free, r2);
       // 字母组（目标/干扰字母）优先取最高层，保证它们出现在第一眼可见的顶层（参考视频顶层约 1/4 是字母）
-      if (/^[TL]/.test(keyList[gi])) free.sort((a, b) => pos[b].layer - pos[a].layer);
+      // 金字塔里各层外圈一开始就都露在外面、都能点，字母随机分布在这些可见牌上（否则顶层会全是字母）
+      const pyramid = S.stackMode !== 'offset' && ((S.insetX || 0) > 0 || (S.insetY || 0) > 0);
+      if (/^[TL]/.test(keyList[gi]) && !pyramid) free.sort((a, b) => pos[b].layer - pos[a].layer);
       const grp = free.slice(0, m);
       for (const t of grp) { keys[t] = keyList[gi]; alive[t] = false; aliveCount--; }
       order.push(grp); gi++; step++;

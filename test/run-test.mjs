@@ -43,8 +43,8 @@ await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_pan
 // 托盘模式 + 3 张消除 + 改间隙/错位/层数 的快速逻辑测试
 const res = await page.evaluate(async () => {
   const out = [];
-  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 0, insetY: 1, layers: 3, winCondition: 'clear' }]) {
-    __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'top'; __app.S.insetX = -1; __app.S.insetY = 0;
+  for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 0, insetY: 1, layers: 3, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'top', insetX: -1, insetY: 0, rowStagger: 0.5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 1, insetY: 1, layers: 4, baseCols: 7, baseRows: 8, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, baseCols: 7, baseRows: 8, winCondition: 'word' }]) {
+    __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'base'; __app.S.insetX = 0.5; __app.S.insetY = 0.5; __app.S.rowStagger = 0;
     for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
     __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
     __app.newGame(true);
@@ -133,6 +133,16 @@ await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.s
 await page.reload(); await page.waitForTimeout(800);
 const v10b = await page.evaluate(() => [__app.S.insetX, __app.S.shadowStrength]);
 console.log('v9->v10 migration', { oldDefaults: v10a, custom: v10b });
+await page.waitForTimeout(1200);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 10, stackGridRef: 'top', baseCols: 6, insetX: -1, insetY: 0, rowStagger: 0.5, depthDarken: 0.12, shadowStrength: 0.8, shadowDX: -0.1, shadowDY: 0.04, boardOffsetY: 0.062 })));
+await page.reload(); await page.waitForTimeout(800);
+const v11a = await page.evaluate(() => ({ s: [__app.S.stackGridRef, __app.S.baseCols, __app.S.insetX, __app.S.insetY, __app.S.rowStagger, __app.S.depthDarken, __app.S.shadowStrength, __app.S.boardOffsetY, __app.S.settingsVersion], perLayer: [0, 1, 2].map(l => __app.G.tiles.filter(t => t.layer === l).length) }));
+await page.waitForTimeout(1200);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 10, insetX: 1, baseCols: 9, rowStagger: 0.3 })));
+await page.reload(); await page.waitForTimeout(800);
+const v11b = await page.evaluate(() => [__app.S.insetX, __app.S.baseCols, __app.S.rowStagger]);
+const v11c = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 10, insetX: -1, stackGridRef: 'top' })); return [__app.S.insetX, __app.S.stackGridRef]; });
+console.log('v10->v11 migration', { oldDefaults: v11a, custom: v11b, imported: v11c });
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);
