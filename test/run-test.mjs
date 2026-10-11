@@ -114,6 +114,15 @@ const v8a = await page.evaluate(() => [__app.S.baseColor, __app.S.sideRevealX, _
 const v8b = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 7, baseColor: '#3aa655', sideRevealX: 0.035 })); return [__app.S.baseColor, __app.S.sideRevealX]; });
 const fontsOk = await page.evaluate(() => [window.__fontsReady === true, document.fonts.check('20px "MJ CJK"', '中'), document.fonts.check('20px "MJ Latin"', 'R'), document.fonts.check('20px "MJ Logo"', 'D')]);
 console.log('v7->v8 migration', { oldDefaults: v8a, imported: v8b, fontsOk });
+// v9：旧存档里的布局/阴影/动画残留值统一恢复默认 + 显示可撤销横幅；导入 JSON 不受影响
+await page.waitForTimeout(1200);
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 8, stackMode: 'offset', offsetX: 0.3, boardOffsetX: 0.02, meetX: 0.47, leftShadow: 0.5, letterColor: '#123456' })));
+await page.reload(); await page.waitForTimeout(800);
+const v9a = await page.evaluate(() => ({ s: [__app.S.stackMode, __app.S.offsetX, __app.S.boardOffsetX, __app.S.meetX, __app.S.leftShadow, __app.S.letterColor, __app.S.settingsVersion], banner: !!document.querySelector('#migrateBanner'), backup: !!localStorage.getItem('mahjongTool.settings.v1.backup') }));
+await page.click('#mbUndo'); await page.waitForTimeout(300);
+const v9undo = await page.evaluate(() => [__app.S.stackMode, __app.S.offsetX, __app.S.meetX]);
+const v9imp = await page.evaluate(() => { __app.importJSON(JSON.stringify({ settingsVersion: 8, stackMode: 'offset', meetX: 0.4 })); return [__app.S.stackMode, __app.S.meetX]; });
+console.log('v8->v9 migration', { reset: v9a, afterUndo: v9undo, imported: v9imp });
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);

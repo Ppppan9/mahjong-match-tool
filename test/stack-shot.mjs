@@ -19,15 +19,17 @@ const measure = async (name, set) => page.evaluate(async ([name, set]) => {
   const G = __app.G, layers = {};
   for (const t of G.tiles) { const l = layers[t.layer] ||= { minx: 1e9, maxx: -1e9, n: 0 }; l.minx = Math.min(l.minx, t.x); l.maxx = Math.max(l.maxx, t.x); l.n++; }
   for (const l of Object.values(layers)) l.cx = +((l.minx + l.maxx) / 2).toFixed(3);
-  return { name, W, H, left: L, right: W - 1 - R, top: T, bottom: H - 1 - B, layers: Object.fromEntries(Object.entries(layers).map(([k, l]) => [k, { n: l.n, cx: l.cx }])), shot: c.toDataURL('image/jpeg', 0.9) };
+  const top = Math.max(...G.tiles.map(t => t.layer)); const ts = G.tiles.filter(t => t.layer === top).map(t => __app.tileScreen(t));
+  const tl = Math.min(...ts.map(q => q.x - q.w / 2)), tr = W - Math.max(...ts.map(q => q.x + q.w / 2));
+  return { name, W, H, topFaceL: +tl.toFixed(2), topFaceR: +tr.toFixed(2), left: L, right: W - 1 - R, top: T, bottom: H - 1 - B, layers: Object.fromEntries(Object.entries(layers).map(([k, l]) => [k, { n: l.n, cx: l.cx }])), shot: c.toDataURL('image/jpeg', 0.9) };
 }, [name, set]);
 const out = [];
-for (const [name, set] of [['stack_centered', {}], ['stack_centered_5layers', { layers: 5 }]]) {
+for (const [name, set] of [['stack_centered', {}], ['stack_centered_5layers', { layers: 5 }], ['stack_pyramid_4layers', { layers: 4, insetX: 0.5, insetY: 0.5 }]]) {
   const r = await measure(name, set);
   fs.writeFileSync(path.join(root, 'screenshots', name + '.jpg'), Buffer.from(r.shot.split(',')[1], 'base64'));
   delete r.shot; out.push(r);
 }
 await page.evaluate(() => localStorage.clear());
 await browser.close();
-for (const r of out) console.log(r.name, 'canvas', r.W + 'x' + r.H, 'left', r.left, 'right', r.right, 'top', r.top, 'bottom', r.bottom, 'perLayer', JSON.stringify(r.layers));
+for (const r of out) console.log(r.name, 'canvas', r.W + 'x' + r.H, 'topLayerFace L/R', r.topFaceL, r.topFaceR, 'pixels(incl. sides)', 'left', r.left, 'right', r.right, 'top', r.top, 'bottom', r.bottom, 'perLayer', JSON.stringify(r.layers));
 console.log('errors', JSON.stringify(errors));

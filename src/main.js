@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { DEFAULTS, SCHEMA } from './settings.js';
 import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { loadFonts, FONT_LOGO } from './fonts.js';
+import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 8;
+const SETTINGS_VERSION = 9;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -24,8 +25,15 @@ const OLD_DEFAULTS_V7 = {
   baseRatio: [0.4], cornerRadius: [0.1], sideColor: ['#deded4'], baseColor: ['#3aa655'], sideRevealX: [0.035], sideRevealY: [0.09],
   targetColorsCustom: ['#1d3f7a,#c62828,#1d4f9e,#2e9a3e,#2e9a3e'], letterColor: ['#c62828'], bgColor: ['#0a0503'], topBarColor: ['#6a2a14'],
 };
+// v9：用户长期使用在线版，旧存档里可能残留旧版布局/阴影/动画参数（单向错位、层微调、旧汇合点、旧阴影等），
+// 导致棋盘偏移、阴影异常。从本地存档升级到 v9 时，这些键一律恢复新默认，并备份旧值、在页面上提示可撤销。
+const V9_RESET_KEYS = ['stackMode', 'stackGridRef', 'insetX', 'insetY', 'stackNudgeX', 'stackNudgeY', 'revealCompensate', 'offsetX', 'offsetY', 'shrinkCols', 'shrinkRows', 'altOffset',
+  'boardOffsetX', 'boardOffsetY', 'boardScale', 'centerOn', 'cameraTilt', 'cameraOrtho', 'cameraFov', 'sideRevealX', 'sideRevealY', 'shadowStrength', 'shadowDX', 'shadowDY', 'leftShadow', 'leftShadowWidth',
+  'tileRatio', 'tileThick', 'baseRatio', 'gapX', 'gapY', 'meetMode', 'meetX', 'meetY', 'arcBend', 'flyScale', 'flyDuration', 'flyEase', 'flyRotate', 'meetGrow', 'burstDuration', 'layers', 'baseCols', 'baseRows'];
+let MIGRATED = null;
 const LEGACY_STACK = { offsetX: 0.08, offsetY: 0, shrinkCols: 0, shrinkRows: 0 };
 let S = loadSettings();
+initAudio(() => S);
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
   j = { ...j };
@@ -50,6 +58,14 @@ function migrate(j, fromStorage = false) {
   }
   if (fromStorage && (j.settingsVersion || 1) < 8) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V7)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) < 9 && Object.keys(j).length > 1) {
+    const changed = V9_RESET_KEYS.filter(k => k in j && String(j[k]) !== String(DEFAULTS[k]));
+    if (changed.length) {
+      try { localStorage.setItem(LS_KEY + '.backup', JSON.stringify(j)); } catch (e) { }
+      MIGRATED = { keys: changed, old: Object.fromEntries(changed.map(k => [k, j[k]])) };
+      changed.forEach(k => delete j[k]);
+    }
   }
   delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;
@@ -175,7 +191,7 @@ function newGame(keepSeed = true) {
   G = {
     tiles: b.tiles.map(t => ({ ...t, state: 'board', dark: 0 })),
     word: b.word, order: b.order, tw: b.tw, th: b.th, letterPairs: b.letterPairs, letterLogical: 0, winT: 0,
-    selected: [], tray: new Array(S.slotCount).fill(null), sprites: [], particles: [], ripples: [], flashes: [],
+    selected: [], tray: new Array(S.slotCount).fill(null), sprites: [], particles: [], ripples: [], flashes: [], seams: [], shake: null,
     cleared: false, clearT: 0, wordDoneT: 0, introT0: performance.now(), touched: false, letterCount: 0,
   };
   computeBounds();
@@ -216,10 +232,17 @@ function shearedBounds() {
   }
   return { minx, maxx, miny, maxy };
 }
+function topFaceBounds() {
+  const { kx } = shearK(), L = BOUNDS.maxL; let minx = 1e9, maxx = -1e9;
+  for (const t of G.tiles) if (t.layer === L) { const x = wX(t) - kx * (L + 1) * S.tileThick; minx = Math.min(minx, x - G.tw / 2); maxx = Math.max(maxx, x + G.tw / 2); }
+  return maxx > minx ? { minx, maxx } : null;
+}
 function fitCamera() {
   if (!BOUNDS || !G) return;
   const b = shearedBounds();
-  const cx = (b.minx + b.maxx) / 2, cy = (b.miny + b.maxy) / 2;
+  let cx = (b.minx + b.maxx) / 2; const cy = (b.miny + b.maxy) / 2;
+  // 水平居中：默认以“最高层牌面”在屏幕上的实际范围居中（不含向右露出的侧面/底座），保证顶层严格位于画面正中
+  if (S.centerOn !== 'all') { const tb = topFaceBounds(); if (tb) cx = (tb.minx + tb.maxx) / 2; }
   const tilt = S.cameraTilt * Math.PI / 180;
   const zr = S.tileThick * (BOUNDS.maxL + 1);
   const bw = b.maxx - b.minx, bh = (b.maxy - b.miny) * Math.cos(tilt) + zr * Math.sin(tilt);
@@ -259,10 +282,15 @@ function makeShadowTex() {
 }
 let leftShadowTex = null;
 function makeLeftShadowTex() {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 8;
-  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 64, 0);
-  for (let i = 0; i <= 10; i++) { const u = i / 10; gr.addColorStop(u, `rgba(0,0,0,${Math.pow(u, 1.35).toFixed(3)})`); }
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 8);
+  // 柔和的接触阴影：横向按平方曲线渐暗（贴近牌边最深），上下两端也淡出，避免出现生硬的长方形色带
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+  const g = c.getContext('2d'), img = g.createImageData(64, 64);
+  for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+    const u = x / 63, v = Math.min(1, Math.min(y, 63 - y) / 12);
+    const a = Math.pow(u, 2.2) * (v * v * (3 - 2 * v));
+    img.data[(y * 64 + x) * 4 + 3] = Math.round(a * 255);
+  }
+  g.putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(c); return t;
 }
 // 侧面颜色渐变：f=0 牌面边缘，f=1 牌底
@@ -421,6 +449,7 @@ function clickTile(t, fromHand = false) {
   if (S.trayMode === 'tray') {
     const tr = G.tray.map((e, i) => e && !e.letter && e.key === t.key ? i : -1).filter(i => i >= 0);
     if (tr.length && G.selected.length + tr.length >= S.matchCount) {
+      sfx('Clack');
       tr.slice(0, S.matchCount - G.selected.length).forEach(i => { const e = G.tray[i]; G.tiles[e.id].state = 'gone'; G.tray[i] = null; burstSprite(e.sprite); });
       matchSelected(); return true;
     }
@@ -430,6 +459,7 @@ function clickTile(t, fromHand = false) {
 }
 // 选中：牌留在原位，染上绿色（视频：点击后立即变绿，等待第二张）
 function select(t) {
+  sfx('Tap');
   t.state = 'selected';
   G.selected.push(t.id);
   applyDark();
@@ -453,6 +483,7 @@ function matchSelected() {
   refreshDark();
   const n = ts.length;
   const sps = ts.map((t, i) => { const sp = makeSprite(t, scr[i]); sp.tint = 1; sp.z = 5; sp.moving = true; return sp; });
+  sfx('Whoosh', { dur: Math.max(0.25, S.flyDuration / 1000) });
   const w = scr[0].w * S.flyScale, hh = scr[0].h * S.flyScale;
   let mx, my;
   if (S.meetMode === 'pair') { // 旧逻辑：两牌中点并向棋盘中心靠拢
@@ -462,12 +493,13 @@ function matchSelected() {
     mx = Math.max(w * n / 2 + 8 * U, Math.min(W - w * n / 2 - 8 * U, mx));
     my = Math.max(VP.y + hh, Math.min(VP.y + VP.h - hh, my));
   } else { // 参考视频：无论牌在哪，都飞到画面固定位置（默认画面中部偏下）并排消除
-    mx = W * S.meetX; my = H * S.meetY;
+    mx = VP.x + VP.w * S.meetX; my = VP.y + VP.h * S.meetY;
   }
   const order = sps.map((s, i) => i).sort((a, b) => sps[a].x - sps[b].x);
   const ease = EASES[S.flyEase] || EASES.sine;
   const flights = order.map((si, rank) => {
     const sp = sps[si];
+    sp.z = 5 + rank * 0.01; // 参考：右边那张压在左边那张上
     const tx = mx + (rank - (n - 1) / 2) * w, ty = my;
     const side = n === 1 ? (sp.x < mx ? -1 : 1) : rank < (n - 1) / 2 ? -1 : rank > (n - 1) / 2 ? 1 : 0;
     const p0 = { x: sp.x, y: sp.y };
@@ -497,11 +529,31 @@ function matchSelected() {
   updateStatus();
 }
 async function burstPair(sps, mx, my, key, w) {
-  spawnParticles(mx, my, w * sps.length * 0.6, true);
+  // 碰撞瞬间：咔嗒声 + 接缝闪光 + 树叶从接触点爆开；两张牌轻微挤压后各自回弹再贴合（参考里两牌是“啪”地贴住，右牌压左牌）
+  sfx('Clack'); sfx('Burst', { delay: 0.05 });
+  const n = sps.length, hh = sps[0].h * sps[0].scale;
+  if (S.impactFlash > 0) for (let i = 1; i < n; i++) G.seams.push({ x: mx + (i - n / 2) * w, y: my, h: hh, w, t0: performance.now(), a: S.impactFlash });
+  if (S.impactShake > 0) G.shake = { t0: performance.now(), amp: S.impactShake * U };
+  spawnParticles(mx, my, w * n * 0.6, true);
   const b = S.burstDuration;
-  const s0 = sps.map(s => s.scale);
-  // 汇合后在原地停留并轻微放大（视频约 +4%，0.5 s），随后快速缩小消失（约 0.15 s）
-  await tween(b * 0.76, k => sps.forEach((s, i) => { s.scale = s0[i] * (1 + S.meetGrow * k); }), t => t);
+  const s0 = sps.map(s => s.scale), x0 = sps.map(s => s.x);
+  const order = sps.map((s, i) => i).sort((p, q) => x0[p] - x0[q]);
+  const side = []; order.forEach((si, rank) => { side[si] = n === 1 ? 0 : (rank - (n - 1) / 2) / ((n - 1) / 2); });
+  const imp = Math.min(180, b * 0.3), sq = S.impactSquash, bo = S.impactBounce * w;
+  // 汇合后在原地停留并轻微放大（视频约 +4%，0.5 s），碰撞形变叠加在前 ~180 ms
+  await tween(b * 0.76, (k, raw) => {
+    const tms = raw * b * 0.76, u = Math.min(1, tms / imp);
+    const e = u < 1 ? Math.sin(Math.PI * u) * (1 - u * 0.35) : 0; // 0→1→0 的冲击包络
+    const settle = u < 1 ? 0 : 0;
+    sps.forEach((s, i) => {
+      s.scale = s0[i] * (1 + S.meetGrow * k);
+      s.sx = 1 - sq * e; s.sy = 1 + sq * 0.6 * e;
+      // 先互相挤进去一点（前 35%），再向外回弹（后 65%），最后贴合
+      const push = u < 0.35 ? -Math.sin(Math.PI * u / 0.35) * 0.4 : Math.sin(Math.PI * (u - 0.35) / 0.65) * (1 - (u - 0.35) * 0.5);
+      s.x = x0[i] + side[i] * bo * (u < 1 ? push : settle);
+    });
+  }, t => t);
+  sps.forEach((s, i) => { s.sx = s.sy = 1; s.x = x0[i]; });
   const s1 = sps.map(s => s.scale);
   await tween(b * 0.24, k => sps.forEach((s, i) => { s.scale = s1[i] * (1 - 0.7 * k); s.alpha = 1 - k; }), easeIn);
   sps.forEach(s => { s.moving = false; removeSprite(s); });
@@ -523,12 +575,14 @@ function letterToSlot(key, x, y, w) {
     entry.arrived = true; sp.z = 0; sp.moving = false;
     sp.scale = 1.35; tween(260, k => { sp.scale = lerp(1.35, 1, k); }, easeBack);
     spawnParticles(to.x, to.y, to.w * 1.1, true, 0.6);
+    sfx('Letter');
     G.letterCount++;
-    if (G.letterCount >= G.word.length) G.wordDoneT = performance.now();
+    if (G.letterCount >= G.word.length) { G.wordDoneT = performance.now(); sfx('Word', { delay: 0.25 }); }
     updateStatus();
   });
 }
 function burstSprite(sp) {
+  sfx('Burst', { vol: 0.7 });
   spawnParticles(sp.x, sp.y, sp.w * sp.scale, true, 0.6);
   const s0 = sp.scale;
   tween(220, k => { sp.scale = s0 * (1 - 0.5 * k); sp.alpha = 1 - k; if (k >= 1) removeSprite(sp); }, easeIn);
@@ -747,9 +801,9 @@ async function autoSolve() {
 
 // ---------------- Recording ----------------
 const REC = { rec: null, chunks: [], mime: '', t0: 0, auto: false, list: [] };
-function pickMime() {
-  const mp4 = ['video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/mp4'];
-  const webm = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+function pickMime(audio = false) {
+  const mp4 = [...(audio ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4;codecs=avc1,opus'] : []), 'video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/mp4'];
+  const webm = [...(audio ? ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus'] : []), 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
   const order = S.recFormat === 'webm' ? webm.concat(mp4) : S.recFormat === 'mp4' ? mp4.concat(webm) : mp4.concat(webm);
   return order.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
 }
@@ -757,9 +811,12 @@ function startRecording(auto = false) {
   if (REC.rec) return;
   if (!window.MediaRecorder || !canvas.captureStream) { toast('当前浏览器不支持录制'); return; }
   const stream = canvas.captureStream(+S.recFps);
-  const mime = pickMime();
+  resumeAudio();
+  const at = audioTrack(); // 音效混音轨（即使静音也保留音轨，保证视频始终带音频）
+  if (at) stream.addTrack(at);
+  const mime = pickMime(!!at);
   let rec;
-  try { rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: Math.round(S.recBitrate * 1e6) }); }
+  try { rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: Math.round(S.recBitrate * 1e6), audioBitsPerSecond: 128000 }); }
   catch (e) { toast('录制启动失败：' + e.message); return; }
   REC.rec = rec; REC.chunks = []; REC.mime = rec.mimeType || mime; REC.t0 = performance.now(); REC.auto = auto;
   rec.ondataavailable = e => { if (e.data && e.data.size) REC.chunks.push(e.data); };
@@ -784,6 +841,7 @@ function stopRecording() { if (REC.rec && REC.rec.state !== 'inactive') REC.rec.
 
 function onCleared() {
   G.cleared = true; G.clearT = performance.now();
+  if (S.endCard) { const gid = G; setTimeout(() => { if (G === gid) sfx('End'); }, S.endDelay); }
   updateStatus();
   if (REC.rec && S.autoStop && REC.auto) {
     const wait = (S.endCard ? S.endDelay + 2600 / Math.max(0.5, S.autoSpeed) : 600) + S.tailSec * 1000;
@@ -956,6 +1014,19 @@ function drawDisclaimer() {
   ctx.fillText(S.disclaimer, 0, 0); ctx.restore();
 }
 function drawEffects(now) {
+  // 碰撞接缝闪光：沿两牌接触线的一道白色光带，约 220 ms 淡出
+  G.seams = (G.seams || []).filter(f => {
+    const k = (now - f.t0) / 240; if (k >= 1) return false;
+    const a = f.a * (1 - k) * (k < 0.15 ? k / 0.15 : 1), gw = f.w * (0.16 + 0.25 * k);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(f.x - gw, 0, f.x + gw, 0);
+    g.addColorStop(0, 'rgba(255,255,220,0)'); g.addColorStop(0.5, `rgba(255,255,230,${a})`); g.addColorStop(1, 'rgba(255,255,220,0)');
+    ctx.fillStyle = g; ctx.fillRect(f.x - gw, f.y - f.h * 0.55, gw * 2, f.h * 1.1);
+    const r = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.h * (0.35 + 0.4 * k));
+    r.addColorStop(0, `rgba(255,255,235,${a * 0.8})`); r.addColorStop(1, 'rgba(255,255,200,0)');
+    ctx.fillStyle = r; ctx.beginPath(); ctx.arc(f.x, f.y, f.h * (0.35 + 0.4 * k), 0, 7); ctx.fill();
+    ctx.restore(); return true;
+  });
   // 闪光
   G.flashes = G.flashes.filter(f => {
     const k = (now - f.t0) / 350; if (k >= 1) return false;
@@ -1093,18 +1164,21 @@ function frame() {
   // draw
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawBackground();
+  if (G && G.shake) { const k = (now - G.shake.t0) / 220; if (k >= 1) G.shake = null; else { const a = G.shake.amp * (1 - k); ctx.setTransform(1, 0, 0, 1, Math.sin(k * 60) * a, Math.cos(k * 47) * a * 0.6); } }
   if (G) {
     renderer.render(scene, camera);
     ctx.drawImage(glCanvas, VP.x, VP.y, VP.w, VP.h);
     drawIntroDim(now);
   }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawTopBar(now);
   if (G) {
     // 托盘内的牌
     const sorted = G.sprites.slice().sort((a, b) => a.z - b.z);
     for (const sp of sorted) {
-      if (sp.rot) { ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.rot * Math.PI / 180); drawTile2D(sp.key, 0, 0, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0); ctx.restore(); }
-      else drawTile2D(sp.key, sp.x, sp.y, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0);
+      const sw = sp.w * sp.scale * (sp.sx || 1), sh = sp.h * sp.scale * (sp.sy || 1);
+      if (sp.rot) { ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.rot * Math.PI / 180); drawTile2D(sp.key, 0, 0, sw, sh, sp.alpha, sp.tint ? 1 : 0); ctx.restore(); }
+      else drawTile2D(sp.key, sp.x, sp.y, sw, sh, sp.alpha, sp.tint ? 1 : 0);
     }
     drawEffects(now);
   }
@@ -1160,7 +1234,7 @@ function onSetting(item, v) {
   if (item.kind === 'regen') scheduleRegen();
   else if (item.kind === 'mesh') { if (G) { clearFaceCache(); buildMeshes(); fitCamera(); } }
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
-  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
+  else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY', 'centerOn'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if (item.k === 'blockedDarken' && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
   if (item.k === 'manualHand') updateCursor();
 }
@@ -1197,6 +1271,10 @@ function buildPanel() {
         el.onchange = () => onSetting(it, el.value); row.appendChild(el);
       } else if (it.type === 'textarea') {
         el = document.createElement('textarea'); el.rows = 2; el.oninput = () => onSetting(it, el.value); row.appendChild(el);
+      } else if (it.type === 'button') {
+        el = document.createElement('button'); el.textContent = '▶ 试听';
+        el.onclick = () => { resumeAudio().then(() => SFX_NAMES.forEach((n, i) => setTimeout(() => sfx(n), i * 650))); };
+        row.appendChild(el);
       } else if (it.type === 'file') {
         el = document.createElement('input'); el.type = 'file'; el.accept = 'image/*';
         el.onchange = () => { const f = el.files[0]; if (!f) return; const fr = new FileReader(); fr.onload = () => onSetting(it, fr.result); fr.readAsDataURL(f); };
@@ -1246,7 +1324,7 @@ function syncPanel() {
   for (const k in controls) {
     const { it, el, val } = controls[k]; const v = S[k];
     if (it.type === 'checkbox') el.checked = !!v;
-    else if (it.type === 'file') { }
+    else if (it.type === 'file' || it.type === 'button') { }
     else el.value = v;
     if (val) val.value = fmt(v, it.step);
   }
@@ -1274,7 +1352,7 @@ function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.ad
 
 $('#btnNew').onclick = () => newGame(true);
 $('#btnSeed').onclick = () => newGame(false);
-$('#btnAuto').onclick = () => autoSolve();
+$('#btnAuto').onclick = () => { resumeAudio(); autoSolve(); };
 $('#btnRec').onclick = () => REC.rec ? stopRecording() : startRecording(false);
 $('#btnShot').onclick = () => canvas.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'mahjong_screenshot.png'; a.click(); });
 $('#btnExport').onclick = () => {
@@ -1290,17 +1368,29 @@ $('#importFile').onchange = e => {
   e.target.value = '';
 };
 $('#btnReset').onclick = () => { if (!confirm('确定恢复全部默认设置？')) return; S = { ...DEFAULTS }; applyAll(); toast('已恢复默认'); };
+function showMigrationBanner() {
+  if (!MIGRATED) return;
+  const bar = document.createElement('div'); bar.id = 'migrateBanner';
+  bar.innerHTML = `<b>已升级到新版</b>：检测到旧版本保存的设置，已把 ${MIGRATED.keys.length} 项棋盘布局 / 阴影 / 配对动画参数恢复为新版默认（与参考视频一致、顶层严格居中）。
+    <button id="mbUndo">撤销，用回旧值</button><button id="mbReset">全部恢复默认</button><button id="mbClose">知道了</button>`;
+  document.body.appendChild(bar);
+  bar.querySelector('#mbUndo').onclick = () => { Object.assign(S, MIGRATED.old); applyAll(); bar.remove(); toast('已恢复旧版数值'); };
+  bar.querySelector('#mbReset').onclick = () => { S = { ...DEFAULTS }; applyAll(); bar.remove(); toast('已恢复全部默认'); };
+  bar.querySelector('#mbClose').onclick = () => bar.remove();
+  window.__migrated = MIGRATED;
+}
 function applyAll() { saveSettings(); syncPanel(); ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg); setResolution(); newGame(true); }
 
 // 供测试/外部脚本使用
 window.__app = {
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
-  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree, importJSON,
+  newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
 };
 
 buildPanel();
 drawHandPreview();
+showMigrationBanner();
 setResolution();
 resetHand();
 newGame(true);

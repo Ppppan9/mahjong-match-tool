@@ -4,7 +4,7 @@ import fs from 'fs'; import path from 'path'; import { execSync } from 'child_pr
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const VIDEO = process.env.REF_VIDEO || '/home/box/agent-data/agents/13473619-9b07-4a6a-9592-552b8a150b7e/attachments/9fe81825ac170d65dd59da2ecbe78e0ce0f9887f1ae0fc3bb7cad9055816ab26.mp4';
 const tmp = '/tmp/mseq'; fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
-const OFFS = [0, 200, 450, 750, 1050, 1400, 1650];
+const OFFS = [0, 300, 700, 1000, 1060, 1110, 1200, 1450, 1700];
 const REF_T0 = 27.45;
 const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -29,7 +29,8 @@ const shots = await page.evaluate(async (OFFS) => {
   for (const o of OFFS) {
     while (cur < o) { cur = Math.min(o, cur + 16); window.__vtime = t0 + cur; await raf(); } // 逐帧推进，保证补间/回调按序触发
     await raf(); await raf();
-    out.push({ t: Math.round(performance.now() - t0), d: document.querySelector('#stage').toDataURL('image/jpeg', 0.9) });
+    const sp = __app.G.sprites.filter(s => s.tint).map(s => ({ x: +s.x.toFixed(1), y: +s.y.toFixed(1), faceW: +(s.w * s.scale * (s.sx || 1)).toFixed(1), scale: +(s.scale * (s.sx || 1)).toFixed(3) }));
+    out.push({ t: Math.round(performance.now() - t0), sp, boardW: +__app.tileScreen(best[0]).w.toFixed(1), vp: __app.VP, d: document.querySelector('#stage').toDataURL('image/jpeg', 0.9) });
   }
   return out;
 }, OFFS);
@@ -46,3 +47,4 @@ const n = OFFS.length;
 const fc = `${OFFS.map((_, i) => `[${i}]`).join('')}hstack=${n}[top];${OFFS.map((_, i) => `[${i + n}]`).join('')}hstack=${n}[bot];[top][bot]vstack=2`;
 execSync(`ffmpeg -v error -y ${inR} ${inQ} -filter_complex "${fc}" -q:v 5 ${root}/screenshots/compare_match_sequence.jpg`);
 console.log('times', shots.map(s => s.t), 'errors', errors);
+for (const s of shots) console.log(s.t, 'boardFaceW', s.boardW, 'vp', JSON.stringify(s.vp), 'sprites', JSON.stringify(s.sp));

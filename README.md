@@ -73,6 +73,16 @@ three.js 为 MIT 协议，详见 `THIRD_PARTY_LICENSES.txt`。牌面与图形均
 * 旧版“单向错位”保留为 `stackMode: offset`；旧存档若自定义过错位/递减参数、或导入旧版 JSON，会自动沿用旧版方式（设置版本 6）。
 * 检查脚本：`node test/stack-shot.mjs` 生成 `screenshots/stack_centered.jpg`、`stack_centered_5layers.jpg` 并输出左右边距。
 
+## v9 更新：修复实机画面 / 顶层严格居中 / 碰撞 / 音效
+
+* **根因**：在线版的旧本地存档会残留旧版布局参数（单向错位 offset 模式、层微调、旧汇合点、旧阴影等），以前的迁移把“与旧默认不同”的值当作自定义保留，于是画面层层错开、顶层偏左。另外相机按含右下侧面的包围盒居中，顶层牌面本身偏左约 4.5 px。
+* **迁移 v9**：从本地存档升级时布局/镜头/阴影/配对动画参数恢复新默认，旧存档备份到 `mahjongTool.settings.v1.backup`，页面顶部出现横幅，可“撤销，用回旧值”或“全部恢复默认”。导入的 JSON 不受影响。
+* **居中**：新设置“水平居中依据”（默认：最高层牌面）。所有视口、DPR、层数下顶层左右边距相等（720 宽画布 58.84/58.84 px）。
+* **阴影**：左侧接触阴影变柔和（强度 0.22、宽 0.14，渐变 + 上下淡出）。
+* **配对**：汇合点改为游戏区（顶栏以下）的比例，默认 0.5/0.5，即画面正中碰撞；放大倍数实测参考约 1.6 倍（保持默认 1.6）。新增碰撞回弹、挤压、接缝闪光、画面震动（默认 0）参数。
+* **音效**：新“音效”分组：静音、总音量、点击/飞行/碰撞/树叶/字母入槽/RELAX 集齐/结束页 各自开关与音量、试听按钮。全部 WebAudio 合成，离线可用；录制的视频带音轨。
+* 截图：`screenshots/viewport_1440x900_before.jpg` / `viewport_1440x900_after.jpg` / `viewport_1440x900_stale_before_after.jpg` / `viewport_1440x900_migration_banner.jpg` / `compare_match_sequence.jpg`。
+
 ## v8 更新：逐牌细节对齐参考视频
 
 新增 `test/replica.mjs`：把顶层 48 张牌按参考 t=0.2s 的排布逐格复刻，与参考帧做整盘对比（`screenshots/compare_replica.jpg`）以及同一张牌 3 倍放大的逐牌对比（`screenshots/compare_detail_letters.jpg / _chars.jpg / _pics.jpg / _dots_bamboo.jpg`）。据此修正：
