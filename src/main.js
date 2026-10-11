@@ -4,7 +4,7 @@ import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 4;
+const SETTINGS_VERSION = 5;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -14,6 +14,8 @@ const OLD_DEFAULTS = {
 };
 // v3 的旧默认值（牌面构成/布局取景在 v4 调整）
 const OLD_DEFAULTS_V3 = { faceKinds: [20], offsetX: [0.5], boardScale: [0.88], boardOffsetY: [0.05] };
+// v4 的旧默认值（配对飞行在 v5 改为飞向画面固定汇合点）
+const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDuration: [220] };
 let S = loadSettings();
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
@@ -21,6 +23,9 @@ function migrate(j, fromStorage = false) {
   if (typeof j.handImage !== 'string' || !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)) j.handImage = '';
   if (fromStorage && (j.settingsVersion || 1) < 3) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) < 5) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V4)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
   }
   if (fromStorage && (j.settingsVersion || 1) < 4) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V3)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
@@ -321,6 +326,7 @@ function tween(dur, fn, ease = easeInOut) {
 const easeInOut = t => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 const easeOut = t => 1 - Math.pow(1 - t, 3);
 const easeIn = t => t * t * t;
+const EASES = { linear: t => t, sine: t => 0.5 - 0.5 * Math.cos(Math.PI * t), cubic: t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2), out: t => 1 - Math.pow(1 - t, 3), in: t => t * t * t };
 const easeBack = t => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
 const lerp = (a, b, t) => a + (b - a) * t;
 const sleep = ms => new Promise(r => setTimeout(r, Math.max(0, ms)));
@@ -388,30 +394,45 @@ function matchSelected() {
   refreshDark();
   const n = ts.length;
   const sps = ts.map((t, i) => { const sp = makeSprite(t, scr[i]); sp.tint = 1; sp.z = 5; sp.moving = true; return sp; });
-  const bc = boardCenterScreen();
-  let mx = sps.reduce((a, s) => a + s.x, 0) / n, my = sps.reduce((a, s) => a + s.y, 0) / n;
-  mx = lerp(mx, bc.x, S.meetCenterPull); my = lerp(my, bc.y, S.meetCenterPull * 0.5);
   const w = scr[0].w * S.flyScale, hh = scr[0].h * S.flyScale;
-  mx = Math.max(w * n / 2 + 8 * U, Math.min(W - w * n / 2 - 8 * U, mx));
-  my = Math.max(VP.y + hh, Math.min(VP.y + VP.h - hh, my));
-  const D = S.outwardAmount * scr[0].w;
+  let mx, my;
+  if (S.meetMode === 'pair') { // 旧逻辑：两牌中点并向棋盘中心靠拢
+    const bc = boardCenterScreen();
+    mx = sps.reduce((a, s) => a + s.x, 0) / n; my = sps.reduce((a, s) => a + s.y, 0) / n;
+    mx = lerp(mx, bc.x, S.meetCenterPull); my = lerp(my, bc.y, S.meetCenterPull * 0.5);
+    mx = Math.max(w * n / 2 + 8 * U, Math.min(W - w * n / 2 - 8 * U, mx));
+    my = Math.max(VP.y + hh, Math.min(VP.y + VP.h - hh, my));
+  } else { // 参考视频：无论牌在哪，都飞到画面固定位置（默认画面中部偏下）并排消除
+    mx = W * S.meetX; my = H * S.meetY;
+  }
   const order = sps.map((s, i) => i).sort((a, b) => sps[a].x - sps[b].x);
-  const clampX = x => Math.max(w * 0.45, Math.min(W - w * 0.45, x));
+  const ease = EASES[S.flyEase] || EASES.sine;
   const flights = order.map((si, rank) => {
     const sp = sps[si];
     const tx = mx + (rank - (n - 1) / 2) * w, ty = my;
-    const side = n === 1 ? 1 : (rank < (n - 1) / 2 ? -1 : 1);
-    let ax = sp.x - mx, ay = (sp.y - my) * 0.5; const al = Math.hypot(ax, ay) || 1;
-    ax = ax / al; ay = ay / al;
-    if (Math.abs(ax) < 0.4) ax = side * 0.6;
-    const p0 = { x: sp.x, y: sp.y }, p1 = { x: clampX(sp.x + ax * D * 1.3), y: sp.y + ay * D * 0.8 };
-    const p2 = { x: clampX(tx + side * D), y: ty }, p3 = { x: tx, y: ty };
+    const side = n === 1 ? (sp.x < mx ? -1 : 1) : rank < (n - 1) / 2 ? -1 : rank > (n - 1) / 2 ? 1 : 0;
+    const p0 = { x: sp.x, y: sp.y };
+    let p1, p2;
+    if (S.meetMode === 'pair') {
+      const D = S.outwardAmount * scr[0].w, clampX = x => Math.max(w * 0.45, Math.min(W - w * 0.45, x));
+      let ax = sp.x - mx, ay = (sp.y - my) * 0.5; const al = Math.hypot(ax, ay) || 1; ax /= al; ay /= al;
+      if (Math.abs(ax) < 0.4) ax = (side || 1) * 0.6;
+      p1 = { x: clampX(sp.x + ax * D * 1.3), y: sp.y + ay * D * 0.8 }; p2 = { x: clampX(tx + (side || 1) * D), y: ty };
+    } else {
+      // 弧线：先水平冲向自己一侧的屏幕边缘（略向上、可略出屏），沿边缘转向汇合点高度，再收进中间
+      const edge = side < 0 ? -W * 0.05 : side > 0 ? W * 1.05 : sp.x;
+      const ex = sp.x + (edge - sp.x) * S.arcBend;
+      p1 = { x: ex, y: sp.y - H * 0.03 * S.arcBend }; p2 = { x: ex, y: ty };
+    }
+    const p3 = { x: tx, y: ty };
     const w0 = sp.w, h0 = sp.h;
-    return tween(S.flyDuration, k => {
+    return tween(S.flyDuration, (k, raw) => {
       sp.x = bez3(p0.x, p1.x, p2.x, p3.x, k); sp.y = bez3(p0.y, p1.y, p2.y, p3.y, k);
-      sp.scale = 1 + (S.flyScale - 1) * Math.min(1, k / 0.3);
+      const u = raw ?? k; // 放大按真实时间走：前段长得快，接近汇合时已到最大
+      sp.scale = 1 + (S.flyScale - 1) * (1 - (1 - u) * (1 - u));
+      sp.rot = S.flyRotate * Math.sin(Math.PI * k) * (side || 1);
       sp.w = w0; sp.h = h0;
-    }, easeInOut);
+    }, ease);
   });
   Promise.all(flights).then(() => burstPair(sps, mx, my, key, w));
   updateStatus();
@@ -420,9 +441,10 @@ async function burstPair(sps, mx, my, key, w) {
   spawnParticles(mx, my, w * sps.length * 0.6, true);
   const b = S.burstDuration;
   const s0 = sps.map(s => s.scale);
-  await tween(b * 0.45, k => sps.forEach((s, i) => { s.scale = s0[i] * (1 + 0.06 * Math.sin(k * Math.PI / 2)); }), easeOut);
+  // 汇合后在原地停留并轻微放大（视频约 +4%，0.5 s），随后快速缩小消失（约 0.15 s）
+  await tween(b * 0.76, k => sps.forEach((s, i) => { s.scale = s0[i] * (1 + S.meetGrow * k); }), t => t);
   const s1 = sps.map(s => s.scale);
-  await tween(b * 0.3, k => sps.forEach((s, i) => { s.scale = s1[i] * (1 - 0.6 * k); s.alpha = 1 - k; }), easeIn);
+  await tween(b * 0.24, k => sps.forEach((s, i) => { s.scale = s1[i] * (1 - 0.7 * k); s.alpha = 1 - k; }), easeIn);
   sps.forEach(s => { s.moving = false; removeSprite(s); });
   updateStatus();
   if (isTarget(key) && G.letterPairs) letterToSlot(key, mx, my, w / S.flyScale);
@@ -436,7 +458,9 @@ function letterToSlot(key, x, y, w) {
   if (G.tray[idx] && !G.tray[idx].letter) { const j = freeTraySlot(); if (j >= 0 && j !== idx) { G.tray[j] = G.tray[idx]; moveSprite(G.tray[j].sprite, slotTileSize(j), 200); } }
   G.tray[idx] = entry;
   const to = slotTileSize(idx);
-  moveSprite(sp, to, Math.max(1, S.letterFlyDuration), easeOut).then(() => {
+  // 视频中字母不从中心飞过去：中心那对缩没的同时，字母直接在托盘格里弹出（带绿叶）。letterFlyDuration>0 时改为飞入
+  if (S.letterFlyDuration <= 0) { sp.x = to.x; sp.y = to.y; sp.w = to.w; sp.h = to.h; }
+  (S.letterFlyDuration > 0 ? moveSprite(sp, to, S.letterFlyDuration, easeOut) : Promise.resolve()).then(() => {
     entry.arrived = true; sp.z = 0; sp.moving = false;
     sp.scale = 1.35; tween(260, k => { sp.scale = lerp(1.35, 1, k); }, easeBack);
     spawnParticles(to.x, to.y, to.w * 1.1, true, 0.6);
@@ -954,7 +978,7 @@ function frame() {
   // tweens
   for (let i = tweens.length - 1; i >= 0; i--) {
     const tw = tweens[i]; const k = Math.min(1, (now - tw.t0) / tw.dur);
-    tw.fn(tw.ease(k)); if (k >= 1) { tweens.splice(i, 1); tw.res(); }
+    tw.fn(tw.ease(k), k); if (k >= 1) { tweens.splice(i, 1); tw.res(); }
   }
   if (G) {
     let changed = false;
@@ -979,7 +1003,10 @@ function frame() {
   if (G) {
     // 托盘内的牌
     const sorted = G.sprites.slice().sort((a, b) => a.z - b.z);
-    for (const sp of sorted) drawTile2D(sp.key, sp.x, sp.y, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0);
+    for (const sp of sorted) {
+      if (sp.rot) { ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.rot * Math.PI / 180); drawTile2D(sp.key, 0, 0, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0); ctx.restore(); }
+      else drawTile2D(sp.key, sp.x, sp.y, sp.w * sp.scale, sp.h * sp.scale, sp.alpha, sp.tint ? 1 : 0);
+    }
     drawEffects(now);
   }
   drawDisclaimer();

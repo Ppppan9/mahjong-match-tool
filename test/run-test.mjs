@@ -85,7 +85,9 @@ console.log('camera migration', { oldDefault22: m1, custom15: m2, imported: m3 }
 await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 3, offsetX: 0.5, faceKinds: 20, boardScale: 0.9 })));
 await page.reload(); await page.waitForTimeout(800);
 console.log('v3->v4 migration', await page.evaluate(() => ({ offsetX: __app.S.offsetX, faceKinds: __app.S.faceKinds, customBoardScale: __app.S.boardScale, ver: __app.S.settingsVersion })));
-await page.evaluate(() => { localStorage.clear(); });
+await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 4, flyScale: 1.25, flyDuration: 1100, letterFlyDuration: 220, burstDuration: 900 })));
+await page.reload(); await page.waitForTimeout(800);
+console.log('v4->v5 migration', await page.evaluate(() => ({ flyScale: __app.S.flyScale, flyDuration: __app.S.flyDuration, letterFly: __app.S.letterFlyDuration, customBurst: __app.S.burstDuration, meetMode: __app.S.meetMode, ver: __app.S.settingsVersion })));
 await page.evaluate(() => { localStorage.clear(); });
 console.log('external requests', requests);
 console.log('errors', errors);

@@ -34,7 +34,7 @@ await snap('ours_end', async () => { await __wait(() => __app.G.cleared, 400000)
 await page.evaluate(() => localStorage.clear());
 await browser.close();
 const pairs = [['initial', 0.2, 'ours_initial', '初始棋盘'], ['intro', 1.6, 'ours_intro', '开场展示RELAX'], ['first_tap', 3.6, 'ours_select', '第一次点击(选中变绿)'],
-  ['match_fly', 5.2, 'ours_fly', '配对飞行(向外再汇合)'], ['match_burst', 6.1, 'ours_burst', '汇合绿叶爆开'], ['letters_tray', 47, 'ours_letters', '字母进入托盘'], ['word_or_end', 53.5, 'ours_end', '结束页']];
+  ['match_fly', 5.2, 'ours_fly', '配对沿弧线飞向画面中部'], ['match_burst', 6.1, 'ours_burst', '画面中部汇合·绿叶爆开'], ['letters_tray', 47, 'ours_letters', '字母进入托盘'], ['word_or_end', 53.5, 'ours_end', '结束页']];
 for (const [name, t, ours, label] of pairs) {
   execSync(`ffmpeg -v error -y -ss ${t} -i "${VIDEO}" -frames:v 1 -vf scale=540:960 ${tmp}/ref_${name}.png`);
   execSync(`ffmpeg -v error -y -i ${tmp}/ref_${name}.png -i ${tmp}/${ours}.jpg -filter_complex "[1]scale=540:960[b];[0][b]hstack=2,pad=iw:ih+50:0:50:color=0x222222,drawtext=text='参考视频 t=${t}s':x=20:y=12:fontsize=26:fontcolor=white:fontfile=/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc,drawtext=text='本工具 · ${label}':x=560:y=12:fontsize=26:fontcolor=yellow:fontfile=/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc" -q:v 6 ${root}/screenshots/compare_${name}.jpg`);
