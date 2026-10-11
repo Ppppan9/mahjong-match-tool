@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { DEFAULTS, SCHEMA } from './settings.js';
 import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
+import { loadFonts, FONT_LOGO } from './fonts.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 7;
+const SETTINGS_VERSION = 8;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -18,6 +19,11 @@ const OLD_DEFAULTS_V3 = { faceKinds: [20], offsetX: [0.5], boardScale: [0.88], b
 const OLD_DEFAULTS_V4 = { flyDuration: [1100], flyScale: [1.25], letterFlyDuration: [220] };
 // v6 默认（居中金字塔、较小的牌）；v7 起默认改回参考视频的同尺寸居中堆叠与取景
 const OLD_DEFAULTS_V6 = { insetX: [0.5], insetY: [0.5], boardScale: [0.86], boardOffsetY: [0.068], tileRatio: [1.18], gapY: [0.04] };
+// v7 默认（牌身细节/字色/顶栏在 v8 按参考视频逐像素校准）
+const OLD_DEFAULTS_V7 = {
+  baseRatio: [0.4], cornerRadius: [0.1], sideColor: ['#deded4'], baseColor: ['#3aa655'], sideRevealX: [0.035], sideRevealY: [0.09],
+  targetColorsCustom: ['#1d3f7a,#c62828,#1d4f9e,#2e9a3e,#2e9a3e'], letterColor: ['#c62828'], bgColor: ['#0a0503'], topBarColor: ['#6a2a14'],
+};
 const LEGACY_STACK = { offsetX: 0.08, offsetY: 0, shrinkCols: 0, shrinkRows: 0 };
 let S = loadSettings();
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
@@ -41,6 +47,9 @@ function migrate(j, fromStorage = false) {
   }
   if (fromStorage && (j.settingsVersion || 1) < 7) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS_V6)) if (k in j && olds.some(o => String(o) === String(j[k]))) delete j[k];
+  }
+  if (fromStorage && (j.settingsVersion || 1) < 8) {
+    for (const [k, olds] of Object.entries(OLD_DEFAULTS_V7)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
   }
   delete j.shadowOffset;
   j.settingsVersion = SETTINGS_VERSION;
@@ -248,6 +257,26 @@ function makeShadowTex() {
   rr(g, 16, 16, c.width - 32, c.height - 32, 14); g.fill();
   const t = new THREE.CanvasTexture(c); return t;
 }
+let leftShadowTex = null;
+function makeLeftShadowTex() {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 8;
+  const g = c.getContext('2d'), gr = g.createLinearGradient(0, 0, 64, 0);
+  for (let i = 0; i <= 10; i++) { const u = i / 10; gr.addColorStop(u, `rgba(0,0,0,${Math.pow(u, 1.35).toFixed(3)})`); }
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 8);
+  const t = new THREE.CanvasTexture(c); return t;
+}
+// 侧面颜色渐变：f=0 牌面边缘，f=1 牌底
+function sideGrad(f) {
+  const slab = 1 - S.baseRatio;
+  if (f <= slab) return mixHex(S.sideColor, shade(S.sideColor, S.sideShade ?? 0.72), slab > 0 ? f / slab : 1);
+  const u = (f - slab) / Math.max(1e-6, S.baseRatio);
+  return mixHex(S.baseColor, S.baseColorDark || S.baseColor, Math.pow(u, 1.15));
+}
+function mixHex(a, b, t) {
+  const pa = toRgb(a), pb = toRgb(b);
+  return `rgb(${pa.map((v, i) => Math.round(v + (pb[i] - v) * t)).join(',')})`;
+}
+function toRgb(c) { const m = /^rgb\((\d+),(\d+),(\d+)\)$/.exec(c); return m ? [+m[1], +m[2], +m[3]] : hexRgb(c); }
 function roundedShape(w, h, r) {
   r = Math.min(r, w * 0.45, h * 0.45);
   const s = new THREE.Shape(), x = -w / 2, y = -h / 2;
@@ -264,27 +293,36 @@ function buildMeshes() {
   applyShear();
   if (shadowTex) shadowTex.dispose();
   shadowTex = makeShadowTex();
+  if (leftShadowTex) leftShadowTex.dispose();
+  leftShadowTex = makeLeftShadowTex();
   const tw = G.tw, th = G.th, thick = S.tileThick;
   const shape = roundedShape(tw * 0.995, th * 0.995, S.cornerRadius);
-  const baseH = thick * S.baseRatio, slabH = thick - baseH;
-  const baseGeo = new THREE.ExtrudeGeometry(shape, { depth: baseH, bevelEnabled: false, curveSegments: 5 });
-  const slabGeo = new THREE.ExtrudeGeometry(shape, { depth: slabH, bevelEnabled: false, curveSegments: 5 });
-  slabGeo.translate(0, 0, baseH);
+  // 牌身：一体挤出，按高度上顶点色渐变（牌面边缘白→灰→浅绿底座→深绿），与参考视频的侧面/底座过渡一致
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false, curveSegments: 6, steps: 12 });
+  { const pos = bodyGeo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) { c.setStyle(sideGrad(1 - pos.getZ(i) / thick)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+    bodyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
   const faceGeo = new THREE.PlaneGeometry(tw * 0.995, th * 0.995); faceGeo.translate(0, 0, thick + 0.003);
   const shGeo = new THREE.PlaneGeometry(tw * 1.32, th * 1.28);
+  // 向左投在相邻牌面上的柔和阴影（参考视频每张牌左侧邻牌的右缘都有一条渐暗带）
+  const lsw = Math.max(0.001, S.leftShadowWidth) * tw;
+  const lsGeo = new THREE.PlaneGeometry(lsw, th * 0.97); lsGeo.translate(-tw * 0.4975 - lsw / 2 + tw * 0.01, 0, thick + 0.006);
   for (const t of G.tiles) {
     const g = new THREE.Group();
     g.position.set(wX(t), wY(t), t.layer * thick);
-    const base = new THREE.Mesh(baseGeo, new THREE.MeshLambertMaterial({ color: S.baseColor }));
-    const slab = new THREE.Mesh(slabGeo, new THREE.MeshLambertMaterial({ color: S.sideColor }));
+    const body = new THREE.Mesh(bodyGeo, new THREE.MeshBasicMaterial({ vertexColors: true }));
     const face = new THREE.Mesh(faceGeo, new THREE.MeshBasicMaterial({ map: faceTexture(t.key), alphaTest: 0.5 }));
     const sh = new THREE.Mesh(shGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: shadowTex, transparent: true, opacity: S.shadowStrength, depthWrite: false }));
     sh.position.set(S.shadowDX * tw, -S.shadowDY * tw, 0.004);
     sh.renderOrder = 1;
-    base.userData.tile = slab.userData.tile = face.userData.tile = t;
-    g.add(base, slab, face, sh);
+    body.userData.tile = face.userData.tile = t;
+    g.add(body, face, sh);
+    if (S.leftShadow > 0) {
+      const ls = new THREE.Mesh(lsGeo, new THREE.MeshBasicMaterial({ color: 0x000000, map: leftShadowTex, transparent: true, opacity: S.leftShadow, depthWrite: false }));
+      ls.renderOrder = 2; g.add(ls);
+    }
     g.visible = t.state === 'board';
-    t.obj = g; t.mBase = base.material; t.mSlab = slab.material; t.mFace = face.material; t.pick = [slab, face];
+    t.obj = g; t.mBase = t.mSlab = body.material; t.mFace = face.material; t.pick = [body, face];
     boardGroup.add(g);
   }
   refreshDark(true);
@@ -303,8 +341,7 @@ function applyDark() {
     const map = faceTexture(sel ? t.key + '#sel' : t.key);
     if (t.mFace.map !== map) { t.mFace.map = map; t.mFace.needsUpdate = true; }
     t.mFace.color.setRGB(f, f, f);
-    t.mBase.color.set(sel ? shade(S.selectTint, 0.75) : S.baseColor).multiplyScalar(f);
-    t.mSlab.color.set(sel ? S.selectTint : S.sideColor).multiplyScalar(f);
+    if (sel) t.mSlab.color.set(S.selectTint).multiplyScalar(f); else t.mSlab.color.setRGB(f, f, f);
   }
 }
 
@@ -322,14 +359,15 @@ function tileScreen(t) {
   return { x: c.x, y: c.y, w: Math.abs(r.x - c.x) * 2, h: Math.abs(u.y - c.y) * 2 };
 }
 function slotRect(i) {
+  // 参考：5 格从 x≈0.392W 到 0.958W，格宽≈73/720，高≈87/1280，竖直中心≈0.487×顶栏高
   const n = S.slotCount, topH = H * S.topBarHeight;
-  const ax = W * 0.36, aw = W * 0.54;
-  let sh = topH * 0.58 * S.slotSize, sw = sh * 0.78;
-  const gap = sw * 0.12;
-  if (n * (sw + gap) > aw) { sw = aw / n - gap; sh = sw / 0.9; }
+  const ax = W * 0.372, aw = W * 0.58;
+  let sh = topH * 0.58 * S.slotSize, sw = sh * 0.835;
+  let gap = sw * 0.115;
+  if (n * (sw + gap) > aw) { sw = aw / n - gap; sh = sw / 0.835; }
   const total = n * sw + (n - 1) * gap;
-  const x0 = ax + (aw - total) / 2;
-  return { x: x0 + i * (sw + gap), y: topH * 0.45 - sh / 2, w: sw, h: sh, cx: x0 + i * (sw + gap) + sw / 2, cy: topH * 0.45 };
+  const x0 = ax + (aw - total) / 2, cy = topH * 0.487;
+  return { x: x0 + i * (sw + gap), y: cy - sh / 2, w: sw, h: sh, cx: x0 + i * (sw + gap) + sw / 2, cy };
 }
 function slotTileSize(i) {
   const r = slotRect(i); let w = r.w * 0.98, h = w * G.th / G.tw;
@@ -761,13 +799,13 @@ function drawTile2D(key, x, y, w, h, alpha = 1, tint = 0) {
   const rx = S.sideRevealX * w, ry = S.sideRevealY * w;
   ctx.save(); ctx.globalAlpha = alpha;
   const x0 = x - w / 2, y0 = y - h / 2;
-  const steps = 8, baseFrom = 1 - S.baseRatio;
+  const steps = 14;
   ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = w * 0.18; ctx.shadowOffsetX = S.shadowDX * w * 1.5; ctx.shadowOffsetY = S.shadowDY * w * 1.5 + w * 0.04;
-  ctx.fillStyle = tint ? shade(S.selectTint, 0.6) : shade(S.baseColor, 0.8); rr(ctx, x0 + rx, y0 + ry, w, h, r); ctx.fill();
+  ctx.fillStyle = tint ? shade(S.selectTint, 0.6) : (S.baseColorDark || S.baseColor); rr(ctx, x0 + rx, y0 + ry, w, h, r); ctx.fill();
   ctx.shadowColor = 'transparent';
   for (let i = steps; i >= 1; i--) {
-    const f = i / steps;
-    ctx.fillStyle = f > baseFrom ? (tint ? shade(S.selectTint, 0.75) : S.baseColor) : (tint ? S.selectTint : shade(S.sideColor, 0.95));
+    const f = i / steps, c = sideGrad(f);
+    ctx.fillStyle = tint ? mixHex(c, S.selectTint, 0.6) : c;
     rr(ctx, x0 + rx * f, y0 + ry * f, w, h, r); ctx.fill();
   }
   ctx.drawImage(tint ? faceCanvasSel(key) : faceCanvas(key), x0, y0, w, h);
@@ -785,25 +823,35 @@ function drawBackground() {
 }
 function drawTopBar(now) {
   const th = H * S.topBarHeight;
-  const g = ctx.createLinearGradient(0, 0, 0, th);
-  g.addColorStop(0, shade(S.topBarColor, 0.85)); g.addColorStop(0.5, S.topBarColor); g.addColorStop(1, shade(S.topBarColor, 0.75));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, th);
-  // 木纹
-  ctx.save(); ctx.globalAlpha = 0.07; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5 * U;
-  for (let i = 0; i < 9; i++) { ctx.beginPath(); const yy = th * (0.1 + i * 0.1); ctx.moveTo(0, yy); ctx.bezierCurveTo(W * 0.3, yy + 4 * U, W * 0.6, yy - 4 * U, W, yy + 2 * U); ctx.stroke(); }
+  // 参考：纯色深棕木板（几乎无渐变）+ 极淡木纹，底部一条较亮的倒角，再下面是黑色
+  ctx.fillStyle = S.topBarColor; ctx.fillRect(0, 0, W, th);
+  ctx.save(); ctx.globalAlpha = 0.05; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.2 * U;
+  const rnd = mulberry32(7);
+  for (let i = 0; i < 16; i++) { ctx.beginPath(); const yy = th * (0.04 + i * 0.058) + rnd() * 3 * U; ctx.moveTo(0, yy); ctx.bezierCurveTo(W * 0.3, yy + (rnd() - 0.5) * 6 * U, W * 0.6, yy + (rnd() - 0.5) * 6 * U, W, yy + (rnd() - 0.5) * 4 * U); ctx.stroke(); }
+  ctx.globalAlpha = 0.035; ctx.strokeStyle = '#fff';
+  for (let i = 0; i < 8; i++) { ctx.beginPath(); const yy = th * (0.08 + i * 0.11) + rnd() * 4 * U; ctx.moveTo(0, yy); ctx.bezierCurveTo(W * 0.35, yy + 3 * U, W * 0.65, yy - 3 * U, W, yy + 1 * U); ctx.stroke(); }
   ctx.restore();
-  ctx.fillStyle = shade(S.topBarColor, 1.35); ctx.fillRect(0, th - 5 * U, W, 2 * U);
-  ctx.fillStyle = shade(S.topBarColor, 0.5); ctx.fillRect(0, th - 3 * U, W, 3 * U);
-  const sg = ctx.createLinearGradient(0, th, 0, th + 14 * U); sg.addColorStop(0, 'rgba(0,0,0,.5)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = sg; ctx.fillRect(0, th, W, 14 * U);
+  const bv = 9 * U, bg = ctx.createLinearGradient(0, th - bv, 0, th + 3 * U);
+  bg.addColorStop(0, shade(S.topBarColor, 1.08)); bg.addColorStop(0.25, shade(S.topBarColor, 1.2)); bg.addColorStop(0.7, shade(S.topBarColor, 1.12)); bg.addColorStop(1, shade(S.topBarColor, 0.55));
+  ctx.fillStyle = bg; ctx.fillRect(0, th - bv, W, bv + 3 * U);
+  const sg = ctx.createLinearGradient(0, th + 3 * U, 0, th + 12 * U); sg.addColorStop(0, 'rgba(0,0,0,.6)'); sg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sg; ctx.fillRect(0, th + 3 * U, W, 9 * U);
   drawLogo(th);
-  // 托盘格
+  // 托盘格：参考为“刻进木板”的圆角槽——内部与木板同色，上/左缘深色内阴影，下/右缘亮色高光
   const sc = hexRgb(S.slotColor);
   for (let i = 0; i < S.slotCount; i++) {
-    const r = slotRect(i);
-    ctx.fillStyle = `rgba(${sc.join(',')},0.55)`; rr(ctx, r.x, r.y, r.w, r.h, r.w * 0.12); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 3 * U; rr(ctx, r.x + 1.5 * U, r.y + 1.5 * U, r.w - 3 * U, r.h - 3 * U, r.w * 0.11); ctx.stroke();
-    ctx.strokeStyle = shade(S.topBarColor, 1.6); ctx.lineWidth = 1.5 * U; rr(ctx, r.x, r.y, r.w, r.h, r.w * 0.12); ctx.stroke();
+    const r = slotRect(i), rad = r.w * 0.13;
+    ctx.save();
+    ctx.fillStyle = `rgba(${sc.join(',')},0.18)`; rr(ctx, r.x, r.y, r.w, r.h, rad); ctx.fill();
+    rr(ctx, r.x, r.y, r.w, r.h, rad); ctx.clip();
+    ctx.shadowColor = 'rgba(0,0,0,.85)'; ctx.shadowBlur = 4 * U; ctx.shadowOffsetX = 1.5 * U; ctx.shadowOffsetY = 2.5 * U;
+    ctx.strokeStyle = 'rgba(20,5,0,.9)'; ctx.lineWidth = 4 * U; rr(ctx, r.x - 2 * U, r.y - 2 * U, r.w + 4 * U, r.h + 4 * U, rad + 2 * U); ctx.stroke();
+    ctx.restore();
+    ctx.save(); ctx.strokeStyle = shade(S.topBarColor, 1.45); ctx.lineWidth = 1.6 * U;
+    ctx.beginPath(); ctx.moveTo(r.x + rad * 0.6, r.y + r.h + 0.8 * U); ctx.lineTo(r.x + r.w - rad, r.y + r.h + 0.8 * U); ctx.quadraticCurveTo(r.x + r.w + 0.8 * U, r.y + r.h + 0.8 * U, r.x + r.w + 0.8 * U, r.y + r.h - rad); ctx.lineTo(r.x + r.w + 0.8 * U, r.y + rad * 0.6); ctx.stroke();
+    ctx.strokeStyle = 'rgba(25,6,0,.75)'; ctx.lineWidth = 1.4 * U;
+    ctx.beginPath(); ctx.moveTo(r.x - 0.6 * U, r.y + r.h - rad * 0.6); ctx.lineTo(r.x - 0.6 * U, r.y + rad); ctx.quadraticCurveTo(r.x - 0.6 * U, r.y - 0.6 * U, r.x + rad, r.y - 0.6 * U); ctx.lineTo(r.x + r.w - rad * 0.6, r.y - 0.6 * U); ctx.stroke();
+    ctx.restore();
   }
   // 开场目标词：字母逐个弹出，停留后淡出（视频 0.4s~2.6s）
   if (S.introWord && G) {
@@ -839,34 +887,64 @@ function star(x, y, r, col) {
   ctx.closePath(); ctx.fill(); ctx.restore();
 }
 function drawLogo(th) {
-  const ax = W * 0.015, aw = W * 0.36 * S.logoScale, ah = th * 0.94 * S.logoScale, ay = (th - ah) / 2 - 2 * U;
+  const ax = W * 0.012, aw = W * 0.33 * S.logoScale, ah = th * 0.98 * S.logoScale, ay = (th - ah) / 2 - 3 * U;
   if (IMG.logoImage) {
     const im = IMG.logoImage, k = Math.min(aw / im.width, ah / im.height);
     ctx.drawImage(im, ax + (aw - im.width * k) / 2, ay + (ah - im.height * k) / 2, im.width * k, im.height * k); return;
   }
-  const cx = ax + aw / 2;
-  const gold = (y0, y1) => { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, '#fff6c2'); g.addColorStop(0.45, '#ffcf2e'); g.addColorStop(1, '#e27a00'); return g; };
-  const line = (txt, y, size, italic, maxW) => {
+  // 参考：金色立体描边字 “online / DOMINO / Cafe”，深棕粗描边 + 外发光；上方金色圆顶剪影、DOMINO 左侧金色光环、Cafe 左侧咖啡杯
+  const cx = ax + aw * 0.5;
+  const goldG = (y0, y1) => { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, '#fff7c8'); g.addColorStop(0.35, '#ffd640'); g.addColorStop(0.7, '#f7a313'); g.addColorStop(1, '#c86a00'); return g; };
+  const word = (txt, x, y, size, maxW, opt = {}) => {
     if (!txt) return;
-    ctx.font = `${italic ? 'italic ' : ''}900 ${size}px "Arial Black","Trebuchet MS",Arial,"Microsoft YaHei",sans-serif`;
-    const mw = ctx.measureText(txt).width; const k = Math.min(1, maxW / mw);
-    ctx.save(); ctx.translate(cx, y); ctx.scale(k, 1);
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineJoin = 'round';
-    ctx.fillStyle = '#5a1a00'; ctx.fillText(txt, 0, size * 0.08);
-    ctx.strokeStyle = '#7a2a00'; ctx.lineWidth = size * 0.16; ctx.strokeText(txt, 0, 0);
-    ctx.fillStyle = gold(-size / 2, size / 2); ctx.fillText(txt, 0, 0);
+    ctx.save();
+    ctx.font = `${opt.italic ? 'italic ' : ''}${size}px ${FONT_LOGO}`;
+    const mw = ctx.measureText(txt).width, k = Math.min(1, maxW / mw);
+    ctx.translate(x, y); if (opt.italic) ctx.transform(1, 0, -0.18, 1, 0, 0); ctx.scale(k * (opt.sx || 1), 1);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ctx.shadowColor = 'rgba(255,170,30,.55)'; ctx.shadowBlur = size * 0.35;
+    ctx.strokeStyle = '#3a1203'; ctx.lineWidth = size * 0.24; ctx.strokeText(txt, 0, size * 0.04);
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = '#8a3a06'; ctx.lineWidth = size * 0.12; ctx.strokeText(txt, 0, size * 0.03);
+    ctx.fillStyle = '#9a4a05'; ctx.fillText(txt, 0, size * 0.07); // 立体下沿
+    ctx.fillStyle = goldG(-size * 0.45, size * 0.45); ctx.fillText(txt, 0, 0);
+    ctx.save(); ctx.globalCompositeOperation = 'source-atop'; ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,240,.55)'; ctx.save(); ctx.beginPath(); ctx.rect(-mw, -size * 0.5, mw * 2, size * 0.22); ctx.clip(); ctx.fillText(txt, 0, 0); ctx.restore();
     ctx.restore();
   };
+  const gold = goldG(ay, ay + ah);
+  if (S.logoDeco) {
+    // 上方金色圆顶/塔尖剪影（online 右侧）
+    ctx.save(); ctx.fillStyle = gold; ctx.strokeStyle = '#3a1203'; ctx.lineWidth = 2 * U; ctx.lineJoin = 'round';
+    const by = ay + ah * 0.3, bx = ax + aw * 0.6;
+    const dome = (x, w, h) => { ctx.beginPath(); ctx.moveTo(x - w / 2, by); ctx.quadraticCurveTo(x - w / 2, by - h * 0.7, x, by - h); ctx.quadraticCurveTo(x + w / 2, by - h * 0.7, x + w / 2, by); ctx.closePath(); ctx.stroke(); ctx.fill(); };
+    const tower = (x, w, h) => { ctx.beginPath(); ctx.rect(x - w / 2, by - h, w, h); ctx.stroke(); ctx.fill(); ctx.beginPath(); ctx.arc(x, by - h - w * 0.4, w * 0.45, 0, 7); ctx.stroke(); ctx.fill(); };
+    ctx.fillStyle = goldG(ay + ah * 0.05, by); ctx.lineWidth = 1.6 * U;
+    tower(bx - aw * 0.3, aw * 0.03, ah * 0.17); dome(bx - aw * 0.18, aw * 0.1, ah * 0.15); dome(bx + aw * 0.0, aw * 0.14, ah * 0.2); tower(bx + aw * 0.13, aw * 0.035, ah * 0.21); dome(bx + aw * 0.24, aw * 0.09, ah * 0.13); tower(bx + aw * 0.33, aw * 0.028, ah * 0.15);
+    ctx.restore();
+    // DOMINO 左侧的金色光环（椭圆弧）
+    ctx.save(); ctx.strokeStyle = '#3a1203'; ctx.lineWidth = ah * 0.07; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.ellipse(cx - aw * 0.06, ay + ah * 0.5, aw * 0.47, ah * 0.3, -0.08, Math.PI * 0.55, Math.PI * 1.45); ctx.stroke();
+    ctx.strokeStyle = gold; ctx.lineWidth = ah * 0.035; ctx.stroke();
+    ctx.restore();
+  }
   if (S.logoRibbon) {
     ctx.save(); ctx.strokeStyle = '#c8102e'; ctx.lineWidth = ah * 0.12; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(ax + aw * 0.08, ay + ah * 0.78); ctx.quadraticCurveTo(cx, ay + ah * 1.02, ax + aw * 0.92, ay + ah * 0.74); ctx.stroke();
     ctx.strokeStyle = '#ff4d5e'; ctx.lineWidth = ah * 0.03; ctx.beginPath(); ctx.moveTo(ax + aw * 0.1, ay + ah * 0.75); ctx.quadraticCurveTo(cx, ay + ah * 0.98, ax + aw * 0.9, ay + ah * 0.71); ctx.stroke();
     ctx.restore();
   }
-  line(S.logoLine1, ay + ah * 0.17, ah * 0.22, true, aw * 0.5);
-  line(S.logoLine2, ay + ah * 0.47, ah * 0.4, false, aw * 0.96);
-  line(S.logoLine3, ay + ah * 0.78, ah * 0.27, true, aw * 0.5);
+  word(S.logoLine1, cx + aw * 0.1, ay + ah * 0.22, ah * 0.2, aw * 0.4);
+  word(S.logoLine2, cx, ay + ah * 0.5, ah * 0.44, aw * 0.94, { sx: 0.92 });
+  word(S.logoLine3, cx + aw * 0.06, ay + ah * 0.79, ah * 0.28, aw * 0.42, { italic: true });
+  if (S.logoDeco) { // Cafe 左侧咖啡杯
+    const x = cx - aw * 0.24, y = ay + ah * 0.78, k = ah * 0.075;
+    ctx.save(); ctx.fillStyle = gold; ctx.strokeStyle = '#3a1203'; ctx.lineWidth = 2 * U; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(x - k, y - k * 0.7); ctx.lineTo(x + k, y - k * 0.7); ctx.quadraticCurveTo(x + k, y + k, x, y + k); ctx.quadraticCurveTo(x - k, y + k, x - k, y - k * 0.7); ctx.closePath(); ctx.stroke(); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + k * 1.05, y - k * 0.05, k * 0.4, -1.3, 1.3); ctx.lineWidth = 4 * U; ctx.stroke(); ctx.strokeStyle = '#ffd640'; ctx.lineWidth = 1.8 * U; ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(x, y + k * 1.15, k * 1.4, k * 0.3, 0, 0, 7); ctx.strokeStyle = '#3a1203'; ctx.lineWidth = 2 * U; ctx.stroke(); ctx.fill();
+    ctx.restore();
+  }
 }
 function drawDisclaimer() {
   if (!S.disclaimer) return;
@@ -1229,3 +1307,5 @@ newGame(true);
 renderRecList();
 updateButtons();
 requestAnimationFrame(frame);
+// 内置字体加载完成后重绘牌面纹理（data URL，通常几十毫秒内完成）
+loadFonts().then(() => { window.__fontsReady = true; if (G) { clearFaceCache(); buildMeshes(); } });
