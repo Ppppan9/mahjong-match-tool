@@ -36,7 +36,7 @@ function dot(ctx, x, y, r, col, inner) {
   ctx.fillStyle = inner || col; ctx.beginPath(); ctx.arc(x, y, r * 0.66, 0, 7); ctx.fill();
   ctx.fillStyle = '#fbfbf6'; ctx.beginPath(); ctx.arc(x, y, r * 0.42, 0, 7); ctx.fill();
 }
-const DOTS = {
+export const DOTS = {
   1: [[.5, .5]], 2: [[.5, .27], [.5, .73]], 3: [[.26, .2], [.5, .5], [.74, .8]],
   4: [[.29, .27], [.71, .27], [.29, .73], [.71, .73]],
   5: [[.27, .22], [.73, .22], [.5, .5], [.27, .78], [.73, .78]],
@@ -304,7 +304,7 @@ function drawPic(ctx, n, w, h) {
 }
 
 // 绘制一个牌面（含圆角底色）。info: {key, letter?, color?}
-export function drawFaceCanvas(S, key, W, H, targetColor) {
+export function drawFaceCanvas(S, key, W, H, targetColor, theme) {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
   const rad = S.cornerRadius / 1 * W * 0.9;
@@ -312,11 +312,13 @@ export function drawFaceCanvas(S, key, W, H, targetColor) {
   g.addColorStop(0, shade(S.faceColor, 1.04)); g.addColorStop(1, shade(S.faceColor, 0.93));
   ctx.fillStyle = g; rr(ctx, 0, 0, W, H, rad); ctx.fill();
   ctx.strokeStyle = 'rgba(0,0,0,.08)'; ctx.lineWidth = W * 0.012; rr(ctx, W * .01, H * .01, W * .98, H * .98, rad); ctx.stroke();
+  if (theme && theme.faceBg) theme.faceBg(ctx, W, H, S, rad);
   // 图案区域
   const k = S.faceScale, iw = W * k, ih = H * k;
   ctx.save(); ctx.translate((W - iw) / 2, (H - ih) / 2);
   const t = key[0], rest = key.slice(1);
-  if (t === 'd') drawDots(ctx, +rest, iw, ih);
+  if (theme && theme.drawFace && theme.drawFace(ctx, key, iw, ih, S, targetColor)) { /* 主题自绘 */ }
+  else if (t === 'd') drawDots(ctx, +rest, iw, ih);
   else if (t === 'b') drawBamboo(ctx, +rest, iw, ih);
   else if (t === 'c') drawText(ctx, NUMS[+rest - 1], iw, ih, NAVY, CJK, iw * 0.8, 0.52, 0.035);
   else if (t === 'w') drawText(ctx, { E: '東', S: '南', W: '西', N: '北' }[rest], iw, ih, INK, CJK, iw * 0.84);
@@ -332,7 +334,7 @@ export function drawFaceCanvas(S, key, W, H, targetColor) {
   ctx.restore();
   return cv;
 }
-function letter(ctx, ch, w, h, col) {
+export function letter(ctx, ch, w, h, col) {
   ctx.save(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.font = `800 ${w * 1.12}px ${LAT}`;
   ctx.translate(w / 2, h * 0.53); ctx.scale(1.02, 1);

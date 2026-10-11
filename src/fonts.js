@@ -5,12 +5,15 @@
 import cjk from './fonts/cjk.woff';
 import latin from './fonts/latin.woff';
 import logo from './fonts/logo.ttf';
+import arabic from './fonts/arabic.woff';
 export const FONT_CJK = '"MJ CJK","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif';
 export const FONT_LAT = '"MJ Latin","Arial Black",Arial,sans-serif';
 export const FONT_LOGO = '"MJ Logo","Arial Black",Arial,sans-serif';
+//  MJ Arabic = El Messiri（wght 700 静态实例）阿拉伯文 + 拉丁子集，保留全部 OpenType 排版特性（连写/字形变体），SIL OFL 1.1
+export const FONT_AR = '"MJ Arabic","Noto Naskh Arabic","Geeza Pro",Tahoma,sans-serif';
 export function loadFonts() {
   if (typeof FontFace === 'undefined') return Promise.resolve();
-  const list = [['MJ CJK', cjk], ['MJ Latin', latin], ['MJ Logo', logo]].map(([n, u]) => {
+  const list = [['MJ CJK', cjk], ['MJ Latin', latin], ['MJ Logo', logo], ['MJ Arabic', arabic]].map(([n, u]) => {
     const f = new FontFace(n, `url(${u})`); document.fonts.add(f); return f.load().catch(e => console.warn('font', n, e));
   });
   return Promise.all(list);

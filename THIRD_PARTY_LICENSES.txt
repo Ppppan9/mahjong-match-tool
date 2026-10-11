@@ -45,6 +45,11 @@ THE SOFTWARE.
 Copyright (c) 2011 Juan Montoreano (juan@remolacha.biz), 
 with Reserved Font Name Lilita
 
+4) "MJ Arabic" —— El Messiri（Variable 字体在 wght=700 处实例化为静态字体，再取 阿拉伯文基本区 + 阿拉伯-印度数字 + ASCII 子集，
+   保留全部 OpenType 排版特性），用于中东风主题的 Logo、数字牌、按钮与免责声明。
+   Copyright 2015 The El Messiri Project Authors (https://github.com/Gue3bara/El-Messiri)
+   License: SIL Open Font License 1.1（全文见下方 OFL 段）。本项目对原字体做了实例化与子集化修改。
+
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
 http://scripts.sil.org/OFL

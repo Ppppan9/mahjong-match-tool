@@ -34,6 +34,9 @@ await page.evaluate(() => {
   g.beginPath(); g.roundRect(40, 6, 30, 90, 15); g.fill(); g.stroke(); g.beginPath(); g.roundRect(20, 70, 90, 80, 24); g.fill(); g.stroke();
   __app.setSetting('handImage', c.toDataURL()); __app.setSetting('handAnchorX', 0.45); __app.setSetting('handAnchorY', 0.05);
 });
+// 可选：AE_THEME=mideast 用中东风主题导出；AE_SUFFIX 区分输出文件名
+const THEME = process.env.AE_THEME || '', SUF = process.env.AE_SUFFIX || '';
+if (THEME) await page.evaluate(t => __app.setSetting('theme', t), THEME);
 await page.waitForTimeout(500);
 const wait = `const wait = (c, ms = 600000) => new Promise((res, rej) => { const t0 = Date.now(); const f = () => { if (c()) res(); else if (Date.now() - t0 > ms) rej(new Error('timeout')); else requestAnimationFrame(f); }; f(); });`;
 
@@ -52,7 +55,7 @@ const infoA = await page.evaluate(async ({ SNAPS }) => {
   const r = await __app.aeStopAndExport();
   return { stats: r.stats, size: r.size, frames: __app.aeLastRec.frames, snaps: __app.aeLastRec.snaps.length, events: __app.aeLastRec.events.length, sfx: __app.aeLastRec.sfx.length };
 }, { SNAPS });
-let d = await dl; await d.saveAs(path.join(root, 'samples/ae_export_sample.zip'));
+let d = await dl; await d.saveAs(path.join(root, `samples/ae_export_sample${SUF}.zip`));
 console.log('A auto', JSON.stringify(infoA));
 // 取回校验帧
 const nS = infoA.snaps; fs.mkdirSync(`${OUT}/snapsA`, { recursive: true }); const tmap = {};
@@ -86,7 +89,7 @@ const infoB = await page.evaluate(async () => {
   return { frames: __app.aeLastRec.frames, events: __app.aeLastRec.events.map(e => e[1]).join(','), stats: window.__lastAEExport.stats };
 });
 await page.waitForTimeout(3000);
-for (const x of dls) { const n = x.suggestedFilename(); if (n.endsWith('.zip')) await x.saveAs(path.join(root, 'samples/ae_export_manual.zip')); else await x.saveAs(`${OUT}/${n}`); }
+for (const x of dls) { const n = x.suggestedFilename(); if (n.endsWith('.zip')) await x.saveAs(path.join(root, `samples/ae_export_manual${SUF}.zip`)); else await x.saveAs(`${OUT}/${n}`); }
 console.log('B manual+rec', JSON.stringify(infoB), dls.map(x => x.suggestedFilename()));
 
 // ---------- C. 变体设置（同一条手动记录重新导出） ----------

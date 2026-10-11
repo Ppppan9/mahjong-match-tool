@@ -1,6 +1,8 @@
 // 所有可调参数：默认值 + 面板分组描述
 // kind: 'regen' 重新生成棋盘 | 'mesh' 重建 3D 模型(保留进度) | 'res' 改变画布分辨率 | 无=实时生效
 export const DEFAULTS = {
+  theme: 'guofeng', themeStore: {},
+  seamColor: '#ffffe6', endButton2: '', sfxScale: 'major', bgPattern: 0.12, bgSkyline: true, bgLanterns: true, bgBoardDim: 0.5,
   // 棋盘布局
   seed: 20261011,
   layers: 3,
@@ -164,7 +166,7 @@ export const DEFAULTS = {
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
-  settingsVersion: 11,
+  settingsVersion: 12,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -203,6 +205,14 @@ const S = (k, label, options, extra = {}) => ({ k, label, type: 'select', option
 const F = (k, label, extra = {}) => ({ k, label, type: 'file', ...extra });
 
 export const SCHEMA = [
+  { group: '主题', open: true, items: [
+    S('theme', '界面主题', [['guofeng', '国风（默认）'], ['mideast', '中东风']]),
+    { k: '_resetTheme', label: '恢复当前主题默认外观', type: 'button', text: '↺ 恢复主题外观', action: 'resetTheme' },
+    R('bgPattern', '几何星纹强度（中东风）', 0, 0.4, 0.01),
+    B('bgSkyline', '城市剪影 / 沙丘（中东风）'),
+    B('bgLanterns', '悬挂灯笼（中东风）'),
+    R('bgBoardDim', '棋盘后方压暗（中东风）', 0, 0.9, 0.01),
+  ]},
   { group: '棋盘布局（间隙 / 错位 / 层数）', open: true, items: [
     { k: 'seed', label: '随机种子', type: 'number', kind: 'regen' },
     R('layers', '堆叠层数', 1, 8, 1, { kind: 'regen' }),
@@ -301,6 +311,7 @@ export const SCHEMA = [
     C('slotColor', '托盘格颜色'),
     R('slotSize', '托盘格大小', 0.6, 1.3, 0.01),
     C('glowColor', '单词集齐发光颜色'),
+    C('seamColor', '碰撞接缝光颜色'),
     T('logoLine1', 'Logo 第1行'),
     T('logoLine2', 'Logo 第2行'),
     T('logoLine3', 'Logo 第3行'),
@@ -345,6 +356,7 @@ export const SCHEMA = [
   { group: '音效', items: [
     B('sfxMute', '静音'),
     R('sfxVolume', '总音量', 0, 1.5, 0.01),
+    S('sfxScale', '旋律音阶（随主题）', [['major', '大调五声（国风）'], ['hijaz', '希贾兹 Hijaz（中东风）']]),
     B('sfxTap', '点击/选中'),
     R('sfxTapVol', '点击/选中 音量', 0, 2, 0.01),
     B('sfxWhoosh', '飞行呼啸'),
@@ -413,6 +425,7 @@ export const SCHEMA = [
     R('endDelay', '通关后出现延迟(ms)', 0, 5000, 50),
     T('endTitle', '标题'),
     T('endButton', '按钮文字'),
+    T('endButton2', '按钮第2行小字（可空）'),
     C('endBg1', '背景色(中心)'),
     C('endBg2', '背景色(边缘)'),
     C('endBtnColor', '按钮颜色'),

@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { DEFAULTS, SCHEMA } from './settings.js';
 import { drawFaceCanvas, roundRect as rr, shade, hexRgb } from './faces.js';
-import { loadFonts, FONT_LOGO } from './fonts.js';
+import { loadFonts, FONT_LOGO, FONT_AR } from './fonts.js';
+import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 11;
+const SETTINGS_VERSION = 12;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -36,6 +37,8 @@ const V9_RESET_KEYS = ['stackMode', 'stackGridRef', 'insetX', 'insetY', 'stackNu
 let MIGRATED = null;
 const LEGACY_STACK = { offsetX: 0.08, offsetY: 0, shrinkCols: 0, shrinkRows: 0 };
 let S = loadSettings();
+let THEME = THEMES[S.theme] || THEMES.guofeng;
+const themeEnv = (extra = {}) => ({ W, H, U, S, VP, th: H * S.topBarHeight, ...extra });
 initAudio(() => S);
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
@@ -77,19 +80,25 @@ function migrate(j, fromStorage = false) {
     }
   }
   delete j.shadowOffset;
+  // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）
+  if (!j.theme || !THEMES[j.theme]) j.theme = 'guofeng';
+  if (!j.themeStore || typeof j.themeStore !== 'object' || Array.isArray(j.themeStore)) j.themeStore = {};
   j.settingsVersion = SETTINGS_VERSION;
   return j;
 }
 function loadSettings() {
-  try { const j = JSON.parse(localStorage.getItem(LS_KEY) || '{}'); return { ...DEFAULTS, ...migrate(j, true) }; } catch (e) { return { ...DEFAULTS }; }
+  try { const j = migrate(JSON.parse(localStorage.getItem(LS_KEY) || '{}'), true); return { ...DEFAULTS, ...themeDefaults(DEFAULTS, j.theme), ...j }; } catch (e) { return { ...DEFAULTS }; }
 }
 let saveTimer = 0;
 function saveSettings() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
+    saveTimer = 0;
     try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { toast('本地保存失败（图片可能过大），请用“导出设置”保存'); }
   }, 300);
 }
+// 关闭/刷新页面前立即写入（防抖定时器可能还没触发）
+window.addEventListener('pagehide', () => { if (!saveTimer) return; clearTimeout(saveTimer); try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } });
 
 // ---------------- DOM ----------------
 const $ = s => document.querySelector(s);
@@ -157,7 +166,7 @@ function faceCanvas(key) {
   if (!faceCache.has(key)) {
     const fw = 192, fh = Math.round(192 * S.tileRatio);
     const k2 = isTarget(key) ? 'T' + targetChar(key) : key;
-    faceCache.set(key, drawFaceCanvas(S, k2, fw, fh, isTarget(key) ? targetColorFor(key) : null));
+    faceCache.set(key, drawFaceCanvas(S, k2, fw, fh, isTarget(key) ? targetColorFor(key) : null, THEME));
   }
   return faceCache.get(key);
 }
@@ -683,6 +692,8 @@ function spawnParticles(x, y, size, swirl = true, countScale = 1) {
     });
   }
 }
+// 粒子外形随主题：国风=树叶，中东风=金色闪光+玫瑰花瓣（m 决定类型，AE 导出按 m 分 8 档取同一外形）
+function drawParticleShape(len, wid, col, m = 0.5) { if (THEME.particle) THEME.particle(ctx, len, wid, col, m); else drawLeaf(len, wid, col); }
 function drawLeaf(len, wid, col) {
   ctx.fillStyle = col; ctx.beginPath();
   ctx.moveTo(-len / 2, 0); ctx.quadraticCurveTo(0, -wid, len / 2, 0); ctx.quadraticCurveTo(0, wid, -len / 2, 0); ctx.fill();
@@ -903,7 +914,8 @@ function drawBackground() {
   if (IMG.bgImage) {
     const im = IMG.bgImage, k = Math.max(W / im.width, H / im.height);
     ctx.drawImage(im, (W - im.width * k) / 2, (H - im.height * k) / 2, im.width * k, im.height * k);
-  } else {
+  } else if (THEME.background) THEME.background(ctx, themeEnv());
+  else {
     const g = ctx.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, H * 0.65);
     g.addColorStop(0, S.bgColor); g.addColorStop(1, S.bgColor2);
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -913,7 +925,8 @@ function drawBackground() {
 function drawTopBar(now, part = 'all', onlySlot = -1) {
   const th = H * S.topBarHeight;
   const P = x => part === 'all' || part === x;
-  if (P('base')) {
+  if (P('base') && THEME.topBar) THEME.topBar(ctx, themeEnv());
+  else if (P('base')) {
   // 参考：纯色深棕木板（几乎无渐变）+ 极淡木纹，底部一条较亮的倒角，再下面是黑色
   ctx.fillStyle = S.topBarColor; ctx.fillRect(0, 0, W, th);
   ctx.save(); ctx.globalAlpha = 0.05; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.2 * U;
@@ -934,6 +947,7 @@ function drawTopBar(now, part = 'all', onlySlot = -1) {
   for (let i = 0; i < S.slotCount; i++) {
     if (!(part === 'all' || (part === 'slot' && (onlySlot < 0 || onlySlot === i)))) continue;
     const r = slotRect(i), rad = r.w * 0.13;
+    if (THEME.slot) { THEME.slot(ctx, r, themeEnv()); continue; }
     ctx.save();
     ctx.fillStyle = `rgba(${sc.join(',')},0.18)`; rr(ctx, r.x, r.y, r.w, r.h, rad); ctx.fill();
     rr(ctx, r.x, r.y, r.w, r.h, rad); ctx.clip();
@@ -999,6 +1013,7 @@ function drawLogo(th) {
     const im = IMG.logoImage, k = Math.min(aw / im.width, ah / im.height);
     ctx.drawImage(im, ax + (aw - im.width * k) / 2, ay + (ah - im.height * k) / 2, im.width * k, im.height * k); return;
   }
+  if (THEME.logo) { THEME.logo(ctx, themeEnv({ ax, ay, aw, ah })); return; }
   // 参考：金色立体描边字 “online / DOMINO / Cafe”，深棕粗描边 + 外发光；上方金色圆顶剪影、DOMINO 左侧金色光环、Cafe 左侧咖啡杯
   const cx = ax + aw * 0.5;
   const goldG = (y0, y1) => { const g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, '#fff7c8'); g.addColorStop(0.35, '#ffd640'); g.addColorStop(0.7, '#f7a313'); g.addColorStop(1, '#c86a00'); return g; };
@@ -1056,11 +1071,12 @@ function drawLogo(th) {
 function drawDisclaimer() {
   if (!S.disclaimer) return;
   const size = H * S.disclaimerSize;
-  ctx.font = `${size}px "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",Arial,sans-serif`;
+  ctx.font = `${size}px ${THEME.fonts?.disclaimer || '"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",Arial,sans-serif'}`;
+  ctx.direction = THEME.fonts?.rtl ? 'rtl' : 'ltr';
   const mw = ctx.measureText(S.disclaimer).width, k = Math.min(1, W * 0.96 / mw);
   ctx.save(); ctx.translate(W / 2, H - size * 1.1); ctx.scale(k, 1);
   ctx.fillStyle = S.disclaimerColor; ctx.globalAlpha = 0.85; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText(S.disclaimer, 0, 0); ctx.restore();
+  ctx.fillText(S.disclaimer, 0, 0); ctx.restore(); ctx.direction = 'ltr';
 }
 function drawEffects(now) {
   // 碰撞接缝闪光：沿两牌接触线的一道白色光带，约 220 ms 淡出
@@ -1085,18 +1101,20 @@ function drawSeam(x, y, h, gw, R, a) { drawSeamBand(x, y, h, gw, a); drawSeamGlo
 function drawSeamBand(x, y, h, gw, a) {
   ctx.save(); ctx.globalCompositeOperation = 'lighter';
   const g = ctx.createLinearGradient(x - gw, 0, x + gw, 0);
-  g.addColorStop(0, 'rgba(255,255,220,0)'); g.addColorStop(0.5, `rgba(255,255,230,${a})`); g.addColorStop(1, 'rgba(255,255,220,0)');
+  const sc = hexRgb(S.seamColor || '#ffffe6').join(',');
+  g.addColorStop(0, `rgba(${sc},0)`); g.addColorStop(0.5, `rgba(${sc},${a})`); g.addColorStop(1, `rgba(${sc},0)`);
   ctx.fillStyle = g; ctx.fillRect(x - gw, y - h * 0.55, gw * 2, h * 1.1);
   ctx.restore();
 }
 function drawSeamGlow(x, y, R, a) {
   const r = ctx.createRadialGradient(x, y, 0, x, y, R);
-  r.addColorStop(0, `rgba(255,255,235,${a * 0.8})`); r.addColorStop(1, 'rgba(255,255,200,0)');
+  const sc = hexRgb(S.seamColor || '#ffffe6').join(',');
+  r.addColorStop(0, `rgba(${sc},${a * 0.8})`); r.addColorStop(1, `rgba(${sc},0)`);
   ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = r; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill(); ctx.restore();
 }
 function drawFlash(x, y, rad, a) {
   const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
-  const c = hexRgb(S.particleColor2);
+  const c = hexRgb(THEME.flashColor || S.particleColor2);
   g.addColorStop(0, `rgba(255,255,220,${0.8 * a})`); g.addColorStop(0.4, `rgba(${c.join(',')},${0.5 * a})`); g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
 }
@@ -1106,7 +1124,7 @@ function drawParticlesAndRipples(now) {
     const q = particleState(p, now); if (!q) return false;
     ctx.save(); ctx.translate(q.x, q.y); ctx.rotate(q.rot);
     ctx.globalAlpha = q.alpha;
-    drawLeaf(p.s, p.s * 0.28, p.col);
+    drawParticleShape(p.s, p.s * 0.28, p.col, p.m);
     ctx.restore(); return true;
   });
   // 点击波纹
@@ -1164,7 +1182,8 @@ function drawEndCard(now, part = 'all') {
   let el, a;
   if (part === 'all') { const q = endCardState(now); if (!q) return; el = q.el; a = q.a; } else { el = 1e9; a = 1; }
   ctx.save(); ctx.globalAlpha = a;
-  if (P('bg')) {
+  if (P('bg') && THEME.endBg) THEME.endBg(ctx, themeEnv(), part === 'all', el);
+  else if (P('bg')) {
   const g = ctx.createRadialGradient(W / 2, H * 0.4, 0, W / 2, H * 0.45, H * 0.7);
   g.addColorStop(0, S.endBg1); g.addColorStop(1, S.endBg2); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   // 顶部挂灯与星星（视频结束页同款）
@@ -1182,7 +1201,8 @@ function drawEndCard(now, part = 'all') {
   const gy = H * 0.3;
   if (P('glow')) {
   const hg = ctx.createRadialGradient(W / 2, gy, 0, W / 2, gy, W * 0.42);
-  hg.addColorStop(0, 'rgba(255,255,170,.75)'); hg.addColorStop(0.45, 'rgba(200,255,120,.25)'); hg.addColorStop(1, 'rgba(200,255,120,0)');
+  const eg = THEME.endGlow || ['rgba(255,255,170,.75)', 'rgba(200,255,120,.25)', 'rgba(200,255,120,0)'];
+  hg.addColorStop(0, eg[0]); hg.addColorStop(0.45, eg[1]); hg.addColorStop(1, eg[2]);
   ctx.fillStyle = hg; ctx.fillRect(0, gy - W * 0.45, W, W * 0.9);
   }
   // 图标
@@ -1192,6 +1212,7 @@ function drawEndCard(now, part = 'all') {
   rr(ctx, ix, iy, s, s, s * 0.2); const bgd = ctx.createLinearGradient(0, iy, 0, iy + s); bgd.addColorStop(0, '#ffe58a'); bgd.addColorStop(1, '#b8801e'); ctx.fillStyle = bgd; ctx.fill(); ctx.restore();
   ctx.save(); rr(ctx, ix + s * 0.03, iy + s * 0.03, s * 0.94, s * 0.94, s * 0.18); ctx.clip();
   if (IMG.endIcon) ctx.drawImage(IMG.endIcon, ix, iy, s, s);
+  else if (THEME.endIcon) THEME.endIcon(ctx, ix, iy, s, themeEnv());
   else {
     const ig = ctx.createLinearGradient(0, iy, 0, iy + s); ig.addColorStop(0, '#3ed36a'); ig.addColorStop(1, '#0b7a33'); ctx.fillStyle = ig; ctx.fillRect(ix, iy, s, s);
     const domino = (x, y, ang, pips) => {
@@ -1213,7 +1234,7 @@ function drawEndCard(now, part = 'all') {
   const ty = H * 0.53;
   if (P('title')) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.font = `900 ${W * 0.105}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = THEME.fonts?.title ? `${THEME.fonts.titleWeight || 700} ${W * 0.11}px ${THEME.fonts.title}` : `900 ${W * 0.105}px "Arial Black","Microsoft YaHei",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineJoin = 'round'; ctx.strokeStyle = '#7a1d0c'; ctx.lineWidth = W * 0.02; ctx.strokeText(S.endTitle, W / 2, ty + 3 * U);
   const tg = ctx.createLinearGradient(0, ty - W * 0.05, 0, ty + W * 0.05); tg.addColorStop(0, '#fff6b0'); tg.addColorStop(0.5, S.endTitleColor); tg.addColorStop(1, '#e08a12');
   ctx.fillStyle = tg; ctx.fillText(S.endTitle, W / 2, ty);
@@ -1228,7 +1249,8 @@ function drawEndCard(now, part = 'all') {
   ctx.fillStyle = bg; rr(ctx, -b.w / 2, -b.h / 2, b.w, b.h, b.h / 2); ctx.fill();
   ctx.shadowColor = 'transparent'; ctx.strokeStyle = '#e8b830'; ctx.lineWidth = 4 * U; ctx.stroke();
   ctx.fillStyle = 'rgba(255,255,255,.28)'; rr(ctx, -b.w / 2 + b.h * 0.25, -b.h / 2 + b.h * 0.1, b.w - b.h * 0.5, b.h * 0.32, b.h * 0.16); ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.font = `bold ${b.h * 0.45}px "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif`; ctx.fillText(S.endButton, 0, 2 * U);
+  if (THEME.endButtonText) THEME.endButtonText(ctx, b, themeEnv());
+  else { ctx.fillStyle = '#fff'; ctx.font = `bold ${b.h * 0.45}px "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif`; ctx.fillText(S.endButton, 0, 2 * U); }
   ctx.restore();
   }
   ctx.restore();
@@ -1333,7 +1355,33 @@ const panelBody = $('#panelBody');
 const controls = {};
 let regenTimer = 0;
 function scheduleRegen() { clearTimeout(regenTimer); regenTimer = setTimeout(() => newGame(true), 180); }
+// ---------------- 主题切换 ----------------
+function themeDiff(id) { const d = themeDefaults(DEFAULTS, id), o = {}; for (const k of THEME_KEYS) if (JSON.stringify(S[k]) !== JSON.stringify(d[k])) o[k] = S[k]; return o; }
+function setTheme(id) {
+  if (!THEMES[id]) id = 'guofeng';
+  const old = S.theme || 'guofeng';
+  if (id !== old) {
+    // 先把当前主题下用户改过的外观存起来，再套用新主题默认值 + 用户在新主题下的改动
+    S.themeStore = { ...(S.themeStore || {}), [old]: themeDiff(old) };
+    Object.assign(S, themeDefaults(DEFAULTS, id), S.themeStore[id] || {});
+    S.theme = id;
+  }
+  THEME = THEMES[id];
+  refreshTheme();
+}
+function resetTheme() {
+  Object.assign(S, themeDefaults(DEFAULTS, S.theme));
+  S.themeStore = { ...(S.themeStore || {}) }; delete S.themeStore[S.theme];
+  refreshTheme(); toast('已恢复「' + THEME.name + '」主题默认外观');
+}
+// 实时重绘：不重开棋盘，保留当前对局进度（棋盘牌、托盘、飞行中的牌都换成新主题的牌面）
+function refreshTheme() {
+  ['bgImage', 'logoImage', 'endIcon'].forEach(loadImg);
+  if (G) { clearFaceCache(); buildMeshes(); fitCamera(); }
+  saveSettings(); syncPanel();
+}
 function onSetting(item, v) {
+  if (item.k === 'theme') { setTheme(v); return; }
   S[item.k] = v; saveSettings();
   if (item.type === 'file') loadImg(item.k);
   if (item.kind === 'regen') scheduleRegen();
@@ -1465,14 +1513,14 @@ $('#btnExport').onclick = () => {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mahjong-settings.json'; a.click();
 };
 // 导入的 JSON 原样采用（不做旧默认值升级）
-function importJSON(txt) { S = { ...DEFAULTS, ...migrate(JSON.parse(txt), false) }; applyAll(); }
+function importJSON(txt) { const j = migrate(JSON.parse(txt), false); S = { ...DEFAULTS, ...themeDefaults(DEFAULTS, j.theme), ...j }; applyAll(); }
 $('#btnImport').onclick = () => $('#importFile').click();
 $('#importFile').onchange = e => {
   const f = e.target.files[0]; if (!f) return;
   f.text().then(txt => { try { importJSON(txt); toast('设置已导入'); } catch (err) { toast('导入失败：' + err.message); } });
   e.target.value = '';
 };
-$('#btnReset').onclick = () => { if (!confirm('确定恢复全部默认设置？')) return; S = { ...DEFAULTS }; applyAll(); toast('已恢复默认'); };
+$('#btnReset').onclick = () => { if (!confirm('确定恢复全部默认设置？')) return; S = { ...DEFAULTS, ...themeDefaults(DEFAULTS, S.theme), theme: S.theme, themeStore: {} }; applyAll(); toast('已恢复默认'); };
 function showMigrationBanner() {
   if (!MIGRATED) return;
   const bar = document.createElement('div'); bar.id = 'migrateBanner';
@@ -1484,7 +1532,7 @@ function showMigrationBanner() {
   bar.querySelector('#mbClose').onclick = () => bar.remove();
   window.__migrated = MIGRATED;
 }
-function applyAll() { saveSettings(); syncPanel(); ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg); setResolution(); newGame(true); }
+function applyAll() { THEME = THEMES[S.theme] || THEMES.guofeng; clearFaceCache(); saveSettings(); syncPanel(); ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg); setResolution(); newGame(true); }
 
 // ---------------- 导出 AE 工程 ----------------
 // 单张牌的“隔离渲染”：只显示这一张牌的指定部件，用真实 three.js 相机渲染一帧，裁出来作为 AE 素材（锚点=牌面中心）
@@ -1525,7 +1573,7 @@ const AE = createAERecorder({
   tileScreen, particleState, rippleState, seamState, flashState, introLetterStates, introDimState, wordGlowState, endCardState, handState, endButtonRect,
   withCtx(c2d, fn) { const old = ctx; ctx = c2d; try { fn(); } finally { ctx = old; } },
   withTransform(x, y, fn) { ctx.save(); ctx.translate(x, y); try { fn(); } finally { ctx.restore(); } },
-  drawBackground, drawTopBar, drawDisclaimer, drawTile2D, drawLeaf, drawRipple, drawSeamBand, drawSeamGlow, drawFlash, star, drawWordGlowRing, drawEndCard, drawHand,
+  drawBackground, drawTopBar, drawDisclaimer, drawTile2D, drawLeaf: drawParticleShape, drawRipple, drawSeamBand, drawSeamGlow, drawFlash, star, drawWordGlowRing, drawEndCard, drawHand,
 });
 let aeLastRec = null;
 function aeStart(opt) { AE.start(opt); updateAEButtons(); toast('开始记录 AE 时间轴'); }
@@ -1550,6 +1598,7 @@ async function aeExport(rec = aeLastRec) {
 const BUTTON_ACTIONS = {
   aeToggle: () => AE.active() ? aeStopAndExport() : aeStart(),
   aeExport: () => aeExport(),
+  resetTheme: () => resetTheme(),
 };
 function updateAEButtons() {
   const b = document.getElementById('btn_aeToggle'); if (!b) return;
@@ -1559,6 +1608,7 @@ function updateAEButtons() {
 
 // 供测试/外部脚本使用
 window.__app = {
+  setTheme, resetTheme, THEMES, get theme() { return S.theme; }, faceCanvas, drawTile2DTo(c2d, ...a) { const old = ctx; ctx = c2d; try { drawTile2D(...a); } finally { ctx = old; } },
   drawPart(c2d, fn, ...args) { const old = ctx; ctx = c2d; try { ({ drawEndCard, drawTopBar, drawBackground })[fn](...args); } finally { ctx = old; } },
   AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },

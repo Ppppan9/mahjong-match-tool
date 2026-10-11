@@ -101,6 +101,6 @@ pick.forEach((p, i) => {
 const n = pick.length, rows = ['ref', 'ours', 'diff'];
 const inputs = rows.flatMap(k => pick.map((_, i) => `-i ${tmp}/s_${k}${i}.png`)).join(' ');
 const fc = rows.map((k, ri) => `${pick.map((_, i) => `[${ri * n + i}]`).join('')}hstack=${n}[r${ri}]`).join(';') + `;[r0][r1][r2]vstack=3`;
-execSync(`ffmpeg -v error -y ${inputs} -filter_complex "${fc}" -q:v 4 ${root}/screenshots/ae_export_check.jpg`);
+execSync(`ffmpeg -v error -y ${inputs} -filter_complex "${fc}" -q:v 4 ${process.env.CHECK_OUT || root + '/screenshots/ae_export_check.jpg'}`);
 console.log('picked', pick.map(p => `${p.label}@${p.r.t.toFixed(2)} psnr ${p.r.psnr.toFixed(1)} big ${p.r.bigPct.toFixed(2)}%`).join(' | '), 'errors', errors);
 fs.writeFileSync('/tmp/aecheck/results.json', JSON.stringify(res.map(r => ({ file: r.file, t: r.t, mean: r.mean, psnr: r.psnr, bigPct: r.bigPct }))));

@@ -202,7 +202,7 @@ export function createAERecorder(api) {
     const leafA = []; if (S.aeLeaves !== 'off' && rec.parts.size) for (let i = 0; i < LEAF_N; i++) {
       const c1 = hex(S.particleColor), c2 = hex(S.particleColor2), m = (i + 0.5) / LEAF_N;
       const col = `rgb(${c1.map((v, k) => Math.round(v + (c2[k] - v) * m)).join(',')})`;
-      leafA.push(local('leaf_' + i, 'fx', LR * 1.3, LR * 0.6, (cx, cy) => api.withTransform(cx, cy, () => api.drawLeaf(LR, LR * 0.28, col))));
+      leafA.push(local('leaf_' + i, 'fx', LR * 1.3, LR * 1.3, (cx, cy) => api.withTransform(cx, cy, () => api.drawLeaf(LR, LR * 0.28, col, m))));
     }
     const RR = 100, Rmid = W * S.rippleSize * 0.906, LWa = S.rippleWidth * U * 0.75 * RR / Math.max(1, Rmid);
     if (rec.ripples.size) A.ripple = local('ripple', 'fx', RR * 2 + LWa * 2 + 6, RR * 2 + LWa * 2 + 6, (cx, cy) => api.drawRipple(cx, cy, RR, LWa, 1));
@@ -453,7 +453,7 @@ export function createAERecorder(api) {
       for (const l of c.layers) if (l.tr) for (const k of ['position', 'scale', 'rotation', 'opacity']) { const kc = keyCount(l.tr[k]); if (kc > 1) stats.keys += kc; }
     }
     const timeline = {
-      meta: { tool: 'mahjong-match-tool', format: 1, created: d.toISOString(), fps, width: CW, height: CH, duration: D, canvas: [W, H], scale: K, sampling: bake ? 'bake' : 'reduce',
+      meta: { tool: 'mahjong-match-tool', format: 1, theme: S.theme || 'guofeng', created: d.toISOString(), fps, width: CW, height: CH, duration: D, canvas: [W, H], scale: K, sampling: bake ? 'bake' : 'reduce',
         saveAep: S.aeSaveAep !== false, aepName: `mahjong_${stamp}.aep`, newProject: true, stats, note: '图层从下到上排列；时间单位秒；位置/锚点单位像素（合成坐标）；缩放为百分比' },
       folders, assets: assets.map(({ id, file, folder, w, h, name }) => ({ id, file, folder, w, h, name })), comps, mainComp: 'main',
     };

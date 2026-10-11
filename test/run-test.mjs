@@ -69,6 +69,7 @@ const handRes = await page.evaluate(async () => {
   return { cursorWithHand: withHand, afterClear: __app.S.handImage === '', cursorAfterClear: document.querySelector('#stage').style.cursor };
 });
 console.log('hand upload/clear', handRes);
+await page.waitForTimeout(500); // 等延迟保存落盘（否则刷新时 pagehide 会把当前设置写回，覆盖下面写入的旧存档）
 await page.evaluate(() => { localStorage.clear(); });
 // 旧版本 localStorage（v1，无 settingsVersion，handImage 为空或为 SVG 默认手）不应带回默认手指
 await page.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ seed: 5, handImage: 'data:image/svg+xml;charset=utf-8,%3Csvg%3E', manualHand: true })));
