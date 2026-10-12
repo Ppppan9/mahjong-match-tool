@@ -1,11 +1,12 @@
+import { DEFAULT_HAND } from './default_hand.js';
 // 所有可调参数：默认值 + 面板分组描述
 // kind: 'regen' 重新生成棋盘 | 'mesh' 重建 3D 模型(保留进度) | 'res' 改变画布分辨率 | 无=实时生效
 export const DEFAULTS = {
-  theme: 'guofeng', themeStore: {},
+  theme: 'mideast', themeStore: {},
   seamColor: '#ffffe6', endButton2: '', sfxScale: 'major', bgPattern: 0.12, bgSkyline: true, bgLanterns: true, bgBoardDim: 0.5,
   // 棋盘布局
-  seed: 20261011,
-  layers: 3,
+  seed: 20261980,
+  layers: 8,
   baseCols: 7,
   baseRows: 8,
   shrinkCols: 0,
@@ -102,7 +103,7 @@ export const DEFAULTS = {
   introDim: 0.45,
   glowColor: '#ffd84a',
   // 动画/特效
-  flyDuration: 1050,
+  flyDuration: 400,
   flyScale: 1.6,
   meetMode: 'screen',
   meetX: 0.5,
@@ -111,8 +112,8 @@ export const DEFAULTS = {
   impactSquash: 0.06,
   impactFlash: 0.7,
   impactShake: 0,
-  arcBend: 1,
-  flyEase: 'linear',
+  arcBend: 0.7,
+  flyEase: 'sine',
   flyRotate: 0,
   meetGrow: 0.04,
   outwardAmount: 0.9,
@@ -191,18 +192,18 @@ export const DEFAULTS = {
   letterOrder: 'natural',
   extraPairChance: 0.3,
   handSize: 0.42,
-  handAnchorX: 0.49,
-  handAnchorY: 0.03,
+  handAnchorX: 0.22039473684210525,
+  handAnchorY: 0.03667763157894737,
   handRotation: 6,
   handFlip: false,
-  handImage: '',
+  handImage: DEFAULT_HAND,
   pressDepth: 0.08,
   rippleColor: '#ffe14d',
   rippleSize: 0.09,
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
-  settingsVersion: 15,
+  settingsVersion: 16,
   // 录制
   recRes: '720x1280',
   recFps: 30,

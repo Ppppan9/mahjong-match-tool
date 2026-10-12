@@ -58,7 +58,7 @@ const p = await realClock();
 await p.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ settingsVersion: 11, topBarColor: '#224466', logoLine1: 'Hello', bgColor: '#101010', seed: 77, layers: 4 })));
 await p.reload(); await p.waitForTimeout(1500);
 const leg = await p.evaluate(() => ({ theme: __app.theme, v: __app.S.settingsVersion, top: __app.S.topBarColor, l1: __app.S.logoLine1, bg: __app.S.bgColor, seed: __app.S.seed, layers: __app.S.layers, sel: [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'mideast'))?.value }));
-check('旧存档无 theme → 国风并保留数值', leg.theme === 'guofeng' && leg.v === 15 && leg.top === '#224466' && leg.l1 === 'Hello' && leg.bg === '#101010' && leg.seed === 77 && leg.layers === 4 && leg.sel === 'guofeng', leg);
+check('旧存档无 theme → 国风并保留数值', leg.theme === 'guofeng' && leg.v === 16 && leg.top === '#224466' && leg.l1 === 'Hello' && leg.bg === '#101010' && leg.seed === 77 && leg.layers === 4 && leg.sel === 'guofeng', leg);
 await p.evaluate(() => localStorage.setItem('mahjongTool.settings.v1', JSON.stringify({ seed: 5 })));
 await p.reload(); await p.waitForTimeout(1200);
 check('最旧存档（无版本号）→ 国风', await p.evaluate(() => __app.theme === 'guofeng' && __app.S.seed === 5));
@@ -83,14 +83,14 @@ await p.evaluate(() => { __app.importJSON(JSON.stringify({ theme: 'mideast', lay
 await p.click('#btnReset'); await p.waitForTimeout(400);
 r = await p.evaluate(() => ({ theme: __app.theme, layers: __app.S.layers, l1: __app.S.logoLine1, top: __app.S.topBarColor, store: __app.S.themeStore, sel: [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.value === 'mideast'))?.value }));
 const md = await p.evaluate(() => __app.THEMES.mideast.defaults);
-check('恢复默认保留中东风（数值回到中东风默认）', r.theme === 'mideast' && r.sel === 'mideast' && r.layers === 3 && r.l1 === md.logoLine1 && r.top === md.topBarColor && Object.keys(r.store).length === 0, r);
+check('恢复默认保留中东风（数值回到中东风默认）', r.theme === 'mideast' && r.sel === 'mideast' && r.layers === 8 && r.l1 === md.logoLine1 && r.top === md.topBarColor && Object.keys(r.store).length === 0, r);
 await p.evaluate(() => __app.setSetting('theme', 'guofeng')); await p.click('#btnReset'); await p.waitForTimeout(400);
 check('恢复默认保留国风', await p.evaluate(() => __app.theme === 'guofeng'));
 
 // ---------- 5. 自动通关中反复切换主题 + 两种主题通关 ----------
 for (const th of ['guofeng', 'mideast']) {
   r = await p.evaluate(async th => {
-    __app.setSetting('theme', th); Object.assign(__app.S, { autoRec: false, autoSpeed: 6, flyDuration: 150, moveMin: 60, moveMax: 80, delayMin: 0, delayMax: 10, thinkChance: 0, endDelay: 200, winCondition: 'clear' });
+    __app.setSetting('theme', th); Object.assign(__app.S, { autoRec: false, autoSpeed: 6, flyDuration: 150, moveMin: 60, moveMax: 80, delayMin: 0, delayMax: 10, thinkChance: 0, endDelay: 200, winCondition: 'clear', layers: 3 });
     __app.newGame(true); __app.autoSolve(); let sw = 0; const t0 = performance.now();
     while (!__app.G.cleared && performance.now() - t0 < 180000) { await new Promise(r => setTimeout(r, 700)); if (sw < 6) { __app.setSetting('theme', __app.theme === 'guofeng' ? 'mideast' : 'guofeng'); sw++; } }
     __app.setSetting('theme', th); await new Promise(r => setTimeout(r, 1500));

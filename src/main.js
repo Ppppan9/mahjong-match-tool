@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 15;
+const SETTINGS_VERSION = 16;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -43,7 +43,8 @@ initAudio(() => S);
 // 设置迁移：fromStorage=true 表示来自 localStorage（会升级旧默认值）；导入的 JSON 只做安全清理，数值原样保留
 function migrate(j, fromStorage = false) {
   j = { ...j };
-  if (typeof j.handImage !== 'string' || !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)) j.handImage = '';
+  // 无效的 handImage（旧版 SVG 默认手等）→ 清空；没有这个键 → 用默认手指
+  if ('handImage' in j && (typeof j.handImage !== 'string' || (j.handImage && !/^data:image\/(png|webp|gif|jpe?g);/i.test(j.handImage)))) j.handImage = '';
   if (fromStorage && (j.settingsVersion || 1) < 3) {
     for (const [k, olds] of Object.entries(OLD_DEFAULTS)) if (k in j && olds.some(o => String(o).toLowerCase() === String(j[k]).toLowerCase())) delete j[k];
   }
@@ -98,14 +99,25 @@ function migrate(j, fromStorage = false) {
     const clean = o => { if (o) for (const [k, olds] of Object.entries(OLD_P)) if (k in o && olds.some(v => String(v).toLowerCase() === String(o[k]).toLowerCase())) delete o[k]; };
     clean(j); if (j.themeStore && typeof j.themeStore === 'object') Object.values(j.themeStore).forEach(clean);
   }
-  // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）
-  if (!j.theme || !THEMES[j.theme]) j.theme = 'guofeng';
+  // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
+  // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
+  if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
+    const OLD16 = { seed: 20261011, layers: 3, flyDuration: 1050, arcBend: 1, flyEase: 'linear', handImage: '', handAnchorX: 0.49, handAnchorY: 0.03 };
+    for (const [k, v] of Object.entries(OLD16)) if (k in j && String(j[k]) === String(v)) delete j[k];
+    // 主题仍是旧默认“国风”且国风外观一个都没改过 → 换成新默认主题
+    if (j.theme === 'guofeng' && !Object.keys(j.themeStore || {}).some(t => Object.keys(j.themeStore[t] || {}).length)) {
+      const gd = themeDefaults(DEFAULTS, 'guofeng');
+      if (THEME_KEYS.every(k => !(k in j) || JSON.stringify(j[k]) === JSON.stringify(gd[k]))) { for (const k of THEME_KEYS) delete j[k]; j.theme = DEFAULTS.theme; }
+    }
+  }
+  // v12：主题。旧存档没有 theme → 国风（外观设置原样保留）；全新（空）存档 → 默认主题
+  if (!j.theme || !THEMES[j.theme]) j.theme = Object.keys(j).length === 0 ? DEFAULTS.theme : 'guofeng';
   if (!j.themeStore || typeof j.themeStore !== 'object' || Array.isArray(j.themeStore)) j.themeStore = {};
   j.settingsVersion = SETTINGS_VERSION;
   return j;
 }
 function loadSettings() {
-  try { const j = migrate(JSON.parse(localStorage.getItem(LS_KEY) || '{}'), true); return { ...DEFAULTS, ...themeDefaults(DEFAULTS, j.theme), ...j }; } catch (e) { return { ...DEFAULTS }; }
+  try { const j = migrate(JSON.parse(localStorage.getItem(LS_KEY) || '{}'), true); return { ...DEFAULTS, ...themeDefaults(DEFAULTS, j.theme), ...j }; } catch (e) { return { ...DEFAULTS, ...themeDefaults(DEFAULTS, DEFAULTS.theme) }; }
 }
 let saveTimer = 0;
 function saveSettings() {

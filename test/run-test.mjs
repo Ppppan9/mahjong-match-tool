@@ -22,7 +22,7 @@ const info = await page.evaluate(() => ({ tiles: __app.G.tiles.length, word: __a
 console.log('board', info);
 if (mode === 'quick') { console.log('errors', errors); await browser.close(); process.exit(0); }
 // 加速自动通关；自动通关默认不再自动录制（v14.1）→ 先点「开始录制」，通关后自动停止并下载
-await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); });
+await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); __app.setSetting('layers', 3); }); // v15.2 默认 8 层（240 张）太慢，录制流程用 3 层
 const dlP = page.waitForEvent('download', { timeout: 400000 });
 await page.click('#btnRec');
 await page.click('#btnAuto');
