@@ -40,6 +40,16 @@ summary{cursor:pointer;padding:8px 10px;font-weight:bold;color:#ffd98a;user-sele
 #migrateBanner{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:50;max-width:min(860px,94vw);background:#fff8e1;color:#4a3000;border:1px solid #e0b84a;border-radius:10px;padding:10px 14px;font-size:13px;line-height:1.6;box-shadow:0 6px 24px rgba(0,0,0,.35)}
 #migrateBanner button{margin-left:8px;padding:3px 10px;border-radius:6px;border:1px solid #c79a2a;background:#ffe69a;cursor:pointer}
 #migrateBanner button#mbReset{background:#4caf50;color:#fff;border-color:#2e7d32}
+
+.row.t-switch label{flex:1}
+.switch{position:relative;display:inline-block;width:46px;height:28px;flex:none;cursor:pointer}
+.switch .switch-input{opacity:0;width:0;height:0;position:absolute}
+.switch .slider{position:absolute;inset:0;background:#555;border-radius:28px;transition:background .2s}
+.switch .slider:before{content:"";position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.switch .switch-input:checked+.slider{background:#34c759}
+.switch .switch-input:checked+.slider:before{transform:translateX(18px)}
+.switch .switch-input:focus-visible+.slider{outline:2px solid #8cf;outline-offset:2px}
+.row.dimmed{opacity:.45;pointer-events:none}
 .tip{font-size:11px;color:#888;padding:6px 10px}
 </style>
 </head>

@@ -204,14 +204,15 @@ export const DEFAULTS = {
   rippleDuration: 450,
   manualHand: true,
   // v17：自动通关手指避让中央碰撞区 + 消除动画图层顺序
-  handAvoid: true,
+  // v18：手指避让改为滑动开关，默认关闭
+  handAvoid: false,
   handAvoidRadius: 0.2,
   handAvoidDir: 'next',
   handAvoidDuration: 450,
   handAvoidWait: 'burst',
   handAvoidHold: 120,
   clearAnimLayer: 'aboveHand',
-  settingsVersion: 17,
+  settingsVersion: 18,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -245,6 +246,7 @@ export const DEFAULTS = {
 const C = (k, label, extra = {}) => ({ k, label, type: 'color', ...extra });
 const R = (k, label, min, max, step, extra = {}) => ({ k, label, type: 'range', min, max, step, ...extra });
 const B = (k, label, extra = {}) => ({ k, label, type: 'checkbox', ...extra });
+const SW = (k, label, extra = {}) => ({ k, label, type: 'switch', ...extra });
 const T = (k, label, extra = {}) => ({ k, label, type: 'text', ...extra });
 const S = (k, label, options, extra = {}) => ({ k, label, type: 'select', options, ...extra });
 const F = (k, label, extra = {}) => ({ k, label, type: 'file', ...extra });
@@ -475,7 +477,7 @@ export const SCHEMA = [
     R('rippleWidth', '波纹线宽', 1, 16, 0.5),
     R('rippleDuration', '波纹时长(ms)', 100, 1500, 10),
     B('manualHand', '手动游玩时手指跟随鼠标(需上传手指)'),
-    B('handAvoid', '自动通关：配对后手指避让中央碰撞区'),
+    SW('handAvoid', '手指避让（自动通关配对后避开中央碰撞区）'),
     R('handAvoidRadius', '避让半径(画面宽比例)', 0.05, 0.5, 0.01),
     S('handAvoidDir', '避让方向', [['next', '朝下一张牌(绕开碰撞区，区内则停在旁边)'], ['auto', '停到区旁(最近侧边/下方，同参考)'], ['down', '向下'], ['left', '左下'], ['right', '右下']]),
     R('handAvoidDuration', '抬指顺势离开时长(ms)', 100, 1500, 10),

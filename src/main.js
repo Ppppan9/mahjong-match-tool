@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 17;
+const SETTINGS_VERSION = 18;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -100,6 +100,8 @@ function migrate(j, fromStorage = false) {
     clean(j); if (j.themeStore && typeof j.themeStore === 'object') Object.values(j.themeStore).forEach(clean);
   }
   // v17：新增手指避让与消除动画图层顺序设置；新键直接取默认值（DEFAULTS 合并），自定义/导入值原样保留，无需改写旧键
+  // v18：手指避让默认改为关。本地存档若仍是旧默认 handAvoid===true → 改为 false；导入的 JSON 原样保留
+  if (fromStorage && (j.settingsVersion || 1) < 18 && j.handAvoid === true) j.handAvoid = false;
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -1716,6 +1718,13 @@ function buildPanel() {
         el = document.createElement('input'); el.type = 'color'; el.oninput = () => onSetting(it, el.value); row.appendChild(el);
       } else if (it.type === 'checkbox') {
         el = document.createElement('input'); el.type = 'checkbox'; el.onchange = () => onSetting(it, el.checked); row.appendChild(el);
+      } else if (it.type === 'switch') {
+        el = document.createElement('input'); el.type = 'checkbox'; el.className = 'switch-input';
+        const wrap = document.createElement('label'); wrap.className = 'switch';
+        const slider = document.createElement('span'); slider.className = 'slider';
+        wrap.appendChild(el); wrap.appendChild(slider);
+        el.onchange = () => { onSetting(it, el.checked); syncHandAvoidDeps(); };
+        row.appendChild(wrap);
       } else if (it.type === 'select') {
         el = document.createElement('select');
         it.options.forEach(([v, l]) => { const o = document.createElement('option'); o.value = v; o.textContent = l; el.appendChild(o); });
@@ -1777,10 +1786,21 @@ function drawHandPreview() {
 function syncPanel() {
   for (const k in controls) {
     const { it, el, val } = controls[k]; const v = S[k];
-    if (it.type === 'checkbox') el.checked = !!v;
+    if (it.type === 'checkbox' || it.type === 'switch') el.checked = !!v;
     else if (it.type === 'file' || it.type === 'button') { }
     else el.value = v;
     if (val) val.value = fmt(v, it.step);
+  }
+  syncHandAvoidDeps();
+}
+const HAND_AVOID_DEPS = ['handAvoidRadius', 'handAvoidDir', 'handAvoidDuration', 'handAvoidWait', 'handAvoidHold'];
+function syncHandAvoidDeps() {
+  const on = !!S.handAvoid;
+  for (const k of HAND_AVOID_DEPS) {
+    const c = controls[k]; if (!c || !c.el) continue;
+    const row = c.el.closest('.row'); if (row) row.classList.toggle('dimmed', !on);
+    c.el.disabled = !on;
+    if (c.val) c.val.disabled = !on;
   }
 }
 function updateButtons() {
