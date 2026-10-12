@@ -37,7 +37,7 @@ const cases = [
 for (const [name, saved] of cases) {
   const { p, ctx, st } = await open(saved);
   const s0 = await state(p);
-  check(`${name}：迁移后 autoRec=false、版本 18`, s0.autoRec === false && s0.v === 18 && (!saved?.theme || s0.theme === saved.theme), s0);
+  check(`${name}：迁移后 autoRec=false、版本 19`, s0.autoRec === false && s0.v === 19 && (!saved?.theme || s0.theme === saved.theme), s0);
   await p.locator('#btnAuto').click();
   await p.waitForTimeout(3000);
   const s1 = await state(p);

@@ -212,7 +212,7 @@ export const DEFAULTS = {
   handAvoidWait: 'burst',
   handAvoidHold: 120,
   clearAnimLayer: 'aboveHand',
-  settingsVersion: 18,
+  settingsVersion: 19,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -233,6 +233,7 @@ export const DEFAULTS = {
   aeSaveAep: true,
   // 结束页
   endCard: true,
+  endCardHand: false, // v19：结尾页默认不显示手指（含自动通关点按钮动画）；可在面板打开
   endDelay: 900,
   endTitle: 'Domino Cafe',
   endButton: '立即下载',
@@ -509,6 +510,7 @@ export const SCHEMA = [
   ]},
   { group: '结束页(End Card)', items: [
     B('endCard', '显示结束页'),
+    SW('endCardHand', '结束页显示手指（自动通关点按钮）'),
     R('endDelay', '通关后出现延迟(ms)', 0, 5000, 50),
     T('endTitle', '标题'),
     T('endButton', '按钮文字'),

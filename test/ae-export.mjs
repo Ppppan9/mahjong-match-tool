@@ -53,10 +53,17 @@ const infoA = await page.evaluate(async ({ SNAPS }) => {
   await wait(() => __app.G.cleared);
   const t = performance.now(); await wait(() => performance.now() - t > __app.S.endDelay + 1800);
   const r = await __app.aeStopAndExport();
-  return { stats: r.stats, size: r.size, frames: __app.aeLastRec.frames, snaps: __app.aeLastRec.snaps.length, events: __app.aeLastRec.events.length, sfx: __app.aeLastRec.sfx.length };
+  const rec = __app.aeLastRec;
+  const endT0 = rec.end.length ? rec.end[0][0] : null;
+  const handAfterEnd = rec.hand.filter(h => endT0 != null && h[0] >= endT0 - 1e-9 && h[6] > 0.01);
+  return { stats: r.stats, size: r.size, frames: rec.frames, snaps: rec.snaps.length, events: rec.events.length, sfx: rec.sfx.length, endCardHand: __app.S.endCardHand, endT0, handAfterEnd: handAfterEnd.length, lastHand: rec.hand.length ? rec.hand[rec.hand.length - 1] : null };
 }, { SNAPS });
 let d = await dl; await d.saveAs(path.join(root, `samples/ae_export_sample${SUF}.zip`));
 console.log('A auto', JSON.stringify(infoA));
+if (infoA.endCardHand !== false) { console.error('FAIL default endCardHand should be false', infoA.endCardHand); process.exit(1); }
+if (infoA.handAfterEnd !== 0) { console.error('FAIL hand visible samples during end card', infoA); process.exit(1); }
+if (infoA.lastHand && infoA.endT0 != null && infoA.lastHand[6] !== 0) { console.error('FAIL last hand sample should be opacity 0 at/before end card', infoA.lastHand, infoA.endT0); process.exit(1); }
+
 // 取回校验帧
 const nS = infoA.snaps; fs.mkdirSync(`${OUT}/snapsA`, { recursive: true }); const tmap = {};
 for (let i = 0; i < nS; i++) {

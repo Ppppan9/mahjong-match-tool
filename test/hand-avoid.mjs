@@ -1,4 +1,4 @@
-// v18：手指避让默认关；测试显式开启。上传测试 PNG 手指（品红），输出 screenshots/hand_avoid_sequence.jpg
+// v19：settingsVersion 19；手指避让默认关；测试显式开启。上传测试 PNG 手指（品红），输出 screenshots/hand_avoid_sequence.jpg
 import { chromium } from 'playwright-core';
 import fs from 'fs'; import path from 'path'; import { execSync } from 'child_process';
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -43,7 +43,7 @@ const frames = [];
 { // A：自动通关（避让开）——记录一次配对全过程
   const { p, ctx } = await open();
   const s = await p.evaluate(() => ({ v: __app.S.settingsVersion, a: __app.S.handAvoid, r: __app.S.handAvoidRadius, d: __app.S.handAvoidDuration, l: __app.S.clearAnimLayer }));
-  check('默认：v18、避让关、消除动画在手指之上', s.v === 18 && s.a === false && s.l === 'aboveHand', s);
+  check('默认：v19、避让关、消除动画在手指之上', s.v === 19 && s.a === false && s.l === 'aboveHand', s);
   await p.evaluate(() => __app.setSetting('handAvoid', true));
   check('显式开启手避让', await p.evaluate(() => __app.S.handAvoid === true));
   // 页面内逐帧记录：从第一次配对（碰撞区出现）那一帧开始记录手指轨迹并在若干时刻截图

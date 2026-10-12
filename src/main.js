@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 18;
+const SETTINGS_VERSION = 19;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -102,6 +102,7 @@ function migrate(j, fromStorage = false) {
   // v17：新增手指避让与消除动画图层顺序设置；新键直接取默认值（DEFAULTS 合并），自定义/导入值原样保留，无需改写旧键
   // v18：手指避让默认改为关。本地存档若仍是旧默认 handAvoid===true → 改为 false；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 18 && j.handAvoid === true) j.handAvoid = false;
+  // v19：新增 endCardHand（默认 false）。新键取 DEFAULTS；自定义/导入值原样保留，无需改写旧键
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -1074,12 +1075,18 @@ async function autoSolve() {
   while (!G.cleared && alive()) await sleep(100);
   if (!alive()) return;
   if (S.endCard) {
-    await sleep(S.endDelay + 700);
+    // 等到结束页开始出现；默认不显示手指也不自动点按钮（endCardHand=false）
+    while (alive() && performance.now() - G.clearT < S.endDelay) await sleep(30);
     if (!alive()) return;
-    for (let i = 0; i < 2 && alive(); i++) {
-      const b = endButtonRect();
-      await handMoveTo(b.x + rand(-10, 10) * U, b.y + rand(-5, 5) * U, 600 / spd);
-      await handPress(null, spd); await sleep(450 / spd);
+    if (!S.endCardHand) { HAND.visible = false; HAND.alpha = 0; await sleep(700 / spd); }
+    else {
+      await sleep(700);
+      if (!alive()) return;
+      for (let i = 0; i < 2 && alive(); i++) {
+        const b = endButtonRect();
+        await handMoveTo(b.x + rand(-10, 10) * U, b.y + rand(-5, 5) * U, 600 / spd);
+        await handPress(null, spd); await sleep(450 / spd);
+      }
     }
   } else {
     await handMoveTo(W * 0.85, H * 1.2, 700 / spd);
@@ -1455,8 +1462,12 @@ function drawRipple(x, y, R, lw, alpha) {
   ctx.globalAlpha = alpha * 0.25; ctx.fillStyle = S.rippleColor; ctx.fill();
   ctx.restore();
 }
+function endCardHidesHand(now = performance.now()) {
+  return !!(S.endCard && !S.endCardHand && G && G.cleared && (now - G.clearT - S.endDelay) >= 0);
+}
 function handState() {
   if (!IMG.handImage || HAND.alpha <= 0.01) return null;
+  if (endCardHidesHand()) return null;
   const im = IMG.handImage, w = W * S.handSize, h = w * im.height / im.width;
   const p = HAND.press * S.pressDepth;
   return { x: HAND.x, y: HAND.y + p * h * 0.15, rot: S.handRotation, sx: (S.handFlip ? -1 : 1) * (1 - p * 0.5), sy: 1 - p * 0.6, alpha: HAND.alpha, press: HAND.press, w, h };
@@ -1590,7 +1601,8 @@ function frame() {
       if (done && !G.sprites.some(s => s.moving)) { if (!G.winT) G.winT = now; if (now - G.winT > (wordWin ? 1000 : 0)) onCleared(); }
     }
   }
-  HAND.alpha += ((HAND.visible ? 1 : 0) - HAND.alpha) * Math.min(1, dt * 12);
+  if (endCardHidesHand(now)) { HAND.visible = false; HAND.alpha = 0; }
+  else HAND.alpha += ((HAND.visible ? 1 : 0) - HAND.alpha) * Math.min(1, dt * 12);
   // draw
   const clearAbove = S.clearAnimLayer !== 'belowHand';
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1892,7 +1904,7 @@ const AE = createAERecorder({
   renderTile: (t, sel) => isolateRender(t, { body: true, face: true, sel }),
   tilePress: t => { if (!G || !t.obj || (!(t.press) && (t.selS || 1) === 1)) return { dx: 0, dy: 0, s: 1 }; const q = tileScreenPressed(t); return { dx: q.dx, dy: q.dy, s: q.s }; },
   renderTileShared: t => ({ shadow: isolateRender(t, { sh: true }), sil: isolateRender(t, { body: true, face: true, black: true }), band: S.leftShadow > 0 ? isolateRender(t, { ls: true }) : null }),
-  tileScreen, particleState, rippleState, seamState, flashState, introLetterStates, introDimState, wordGlowState, endCardState, handState, endButtonRect,
+  tileScreen, particleState, rippleState, seamState, flashState, introLetterStates, introDimState, wordGlowState, endCardState, endCardHidesHand, handState, endButtonRect,
   withCtx(c2d, fn) { const old = ctx; ctx = c2d; try { fn(); } finally { ctx = old; } },
   withTransform(x, y, fn) { ctx.save(); ctx.translate(x, y); try { fn(); } finally { ctx.restore(); } },
   drawBackground, drawTopBar, drawDisclaimer, drawTile2D, drawLeaf: drawParticleShape, drawRipple, drawSeamBand, drawSeamGlow, drawFlash, star, drawWordGlowRing, drawEndCard, drawHand,
@@ -1936,6 +1948,7 @@ window.__app = {
   get S() { return S; }, get G() { return G; }, get HAND() { return HAND; }, zoneIntrude, avoidRadius, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
   newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, spawnParticles, particleState, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
+  endCardState, endCardHidesHand, handState, endButtonRect,
 };
 
 buildPanel();

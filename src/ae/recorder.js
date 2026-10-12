@@ -420,10 +420,12 @@ export function createAERecorder(api) {
       const c = compDef('endcard', N('结束页', 'End card'), ecl);
       mainLayers.push(L(c.name, { comp: c.id }, { in: fr.in, label: LABEL.end, markers: [[r4(fr.in), N('结束页', 'end card')]] }));
     }
-    // 手指
+    // 手指（结尾页默认不显示：采样在结束页起点收束为透明，图层出点停在该处）
     if (A.hand && rec.hand.length) {
       const fr = frames(rec.hand);
-      mainLayers.push(L(N('手指', 'Hand'), { asset: A.hand.id }, { in: fr.in, label: LABEL.hand, tr: { anchor: [A.hand.ax, A.hand.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), rotation: prop(fr, v => v[3], TOL.rot), scale: prop(fr, v => [v[4] * 100 * K, v[5] * 100 * K], TOL.scale), opacity: prop(fr, v => v[6] * 100, TOL.op) } }));
+      const last = rec.hand[rec.hand.length - 1];
+      const hout = last[6] === 0 ? Math.round(last[0] * fps) / fps : fr.out;
+      mainLayers.push(L(N('手指', 'Hand'), { asset: A.hand.id }, { in: fr.in, out: Math.min(D, Math.max(fr.in + 1 / fps, hout)), label: LABEL.hand, tr: { anchor: [A.hand.ax, A.hand.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), rotation: prop(fr, v => v[3], TOL.rot), scale: prop(fr, v => [v[4] * 100 * K, v[5] * 100 * K], TOL.scale), opacity: prop(fr, v => v[6] * 100, TOL.op) } }));
     }
     if (clearAbove) mainLayers.push(...clearL);
     // 音频
