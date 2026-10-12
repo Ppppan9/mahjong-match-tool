@@ -356,24 +356,26 @@ export function createAERecorder(api) {
     }
     // 飞行牌、托盘字母（按绘制层级 z，同 z 按出现先后）
     const sprites = [...rec.sprites.values()].sort((a, b) => (a.z - b.z) || (a.id - b.id));
+    // v16：消除动画（配对飞行/碰撞牌 z 5.x、接缝光、闪光、树叶）单独收集，默认放在手指图层之上
+    const clearL = [], isClearZ = z => z >= 5 && z < 6;
     let fly = 0;
     for (const tr of sprites) {
       const isLetter = /^[TL]/.test(tr.key) && !tr.tint;
       fly++;
       const nm = isLetter ? N('字母 ', 'Letter ') + tr.key : N('飞行牌 #', 'Flying #') + fly + ' ' + tr.key;
-      mainLayers.push(spriteLayer(nm, tr.key, tr.tint, tr.s, isLetter ? LABEL.letter : LABEL.fly, [[r4(Math.round(tr.s[0][0] * fps) / fps), isLetter ? N('字母入槽', 'letter') : N('配对飞行', 'match')]]));
+      (isClearZ(tr.z) ? clearL : mainLayers).push(spriteLayer(nm, tr.key, tr.tint, tr.s, isLetter ? LABEL.letter : LABEL.fly, [[r4(Math.round(tr.s[0][0] * fps) / fps), isLetter ? N('字母入槽', 'letter') : N('配对飞行', 'match')]]));
     }
     // 接缝光 / 闪光
     let n = 0;
     for (const tr of rec.seams.values()) {
       const fr = frames(tr.s); n++;
-      mainLayers.push(L(N('碰撞接缝光带 #', 'Seam band #') + n, { asset: A.seamBand.id }, { in: fr.in, out: fr.out, label: LABEL.fx, blend: 'add', markers: [[r4(fr.in), N('碰撞', 'impact')]], tr: { anchor: [A.seamBand.ax, A.seamBand.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[4] / GW0 * 100 * K, v[3] / H0 * 100 * K], TOL.scale), opacity: prop(fr, v => Math.min(100, v[6] * 100), TOL.op) } }));
-      mainLayers.push(L(N('碰撞光晕 #', 'Seam glow #') + n, { asset: A.seamGlow.id }, { in: fr.in, out: fr.out, label: LABEL.fx, blend: 'add', tr: { anchor: [A.seamGlow.ax, A.seamGlow.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[5] / R0 * 100 * K, v[5] / R0 * 100 * K], TOL.scale), opacity: prop(fr, v => Math.min(100, v[6] * 100), TOL.op) } }));
+      clearL.push(L(N('碰撞接缝光带 #', 'Seam band #') + n, { asset: A.seamBand.id }, { in: fr.in, out: fr.out, label: LABEL.fx, blend: 'add', markers: [[r4(fr.in), N('碰撞', 'impact')]], tr: { anchor: [A.seamBand.ax, A.seamBand.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[4] / GW0 * 100 * K, v[3] / H0 * 100 * K], TOL.scale), opacity: prop(fr, v => Math.min(100, v[6] * 100), TOL.op) } }));
+      clearL.push(L(N('碰撞光晕 #', 'Seam glow #') + n, { asset: A.seamGlow.id }, { in: fr.in, out: fr.out, label: LABEL.fx, blend: 'add', tr: { anchor: [A.seamGlow.ax, A.seamGlow.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[5] / R0 * 100 * K, v[5] / R0 * 100 * K], TOL.scale), opacity: prop(fr, v => Math.min(100, v[6] * 100), TOL.op) } }));
     }
     n = 0;
     for (const tr of rec.flashes.values()) {
       const fr = frames(tr.s); n++;
-      mainLayers.push(L(N('闪光 #', 'Flash #') + n, { asset: A.flash.id }, { in: fr.in, out: fr.out, label: LABEL.fx, tr: { anchor: [A.flash.ax, A.flash.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[3] / R0 * 100 * K, v[3] / R0 * 100 * K], TOL.scale), opacity: prop(fr, v => v[4] * 100, TOL.op) } }));
+      clearL.push(L(N('闪光 #', 'Flash #') + n, { asset: A.flash.id }, { in: fr.in, out: fr.out, label: LABEL.fx, tr: { anchor: [A.flash.ax, A.flash.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), scale: prop(fr, v => [v[3] / R0 * 100 * K, v[3] / R0 * 100 * K], TOL.scale), opacity: prop(fr, v => v[4] * 100, TOL.op) } }));
     }
     // 树叶
     if (S.aeLeaves !== 'off' && leafA.length) {
@@ -389,10 +391,12 @@ export function createAERecorder(api) {
         if (S.aeLeaves === 'precomp') {
           const c = compDef('burst_' + bi, N('树叶爆开 #', 'Leaf burst #') + bi, ls);
           const tin = Math.min(...ls.map(x => x.in)), tout = Math.max(...ls.map(x => x.out));
-          mainLayers.push(L(c.name, { comp: c.id }, { in: tin, out: tout, label: LABEL.leaf, markers: [[r4(tin), N('树叶爆开', 'burst')]] }));
-        } else mainLayers.push(...ls);
+          clearL.push(L(c.name, { comp: c.id }, { in: tin, out: tout, label: LABEL.leaf, markers: [[r4(tin), N('树叶爆开', 'burst')]] }));
+        } else clearL.push(...ls);
       }
     }
+    const clearAbove = S.clearAnimLayer !== 'belowHand';
+    if (!clearAbove) mainLayers.push(...clearL);
     // 点击波纹
     n = 0;
     for (const tr of rec.ripples.values()) {
@@ -421,6 +425,7 @@ export function createAERecorder(api) {
       const fr = frames(rec.hand);
       mainLayers.push(L(N('手指', 'Hand'), { asset: A.hand.id }, { in: fr.in, label: LABEL.hand, tr: { anchor: [A.hand.ax, A.hand.ay], position: prop(fr, v => [v[1] * K, v[2] * K], TOL.pos), rotation: prop(fr, v => v[3], TOL.rot), scale: prop(fr, v => [v[4] * 100 * K, v[5] * 100 * K], TOL.scale), opacity: prop(fr, v => v[6] * 100, TOL.op) } }));
     }
+    if (clearAbove) mainLayers.push(...clearL);
     // 音频
     const audioFiles = [];
     if (S.aeAudio !== 'none' && rec.sfx.length) {

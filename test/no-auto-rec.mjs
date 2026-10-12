@@ -37,7 +37,7 @@ const cases = [
 for (const [name, saved] of cases) {
   const { p, ctx, st } = await open(saved);
   const s0 = await state(p);
-  check(`${name}：迁移后 autoRec=false、版本 16`, s0.autoRec === false && s0.v === 16 && (!saved?.theme || s0.theme === saved.theme), s0);
+  check(`${name}：迁移后 autoRec=false、版本 17`, s0.autoRec === false && s0.v === 17 && (!saved?.theme || s0.theme === saved.theme), s0);
   await p.locator('#btnAuto').click();
   await p.waitForTimeout(3000);
   const s1 = await state(p);
@@ -48,7 +48,7 @@ for (const [name, saved] of cases) {
 
 // 自动通关到通关全程都不录制、不下载
 {
-  const { p, ctx, st } = await open({ settingsVersion: 13, autoRec: true, seed: 8, autoSpeed: 4, tailSec: 0.5, endDelay: 500 });
+  const { p, ctx, st } = await open({ settingsVersion: 13, autoRec: true, seed: 8, layers: 3, autoSpeed: 4, tailSec: 0.5, endDelay: 500 });
   await p.locator('#btnAuto').click();
   await p.waitForFunction(() => __app.G.cleared, null, { timeout: 240000 });
   await p.waitForTimeout(4000);
@@ -59,7 +59,7 @@ for (const [name, saved] of cases) {
 
 // 手动「开始录制」后自动通关：通关后自动停止并下载（视频 + AE 包）
 {
-  const { p, ctx, st } = await open({ settingsVersion: 14, seed: 8, autoSpeed: 4, tailSec: 0.5, endDelay: 500 });
+  const { p, ctx, st } = await open({ settingsVersion: 14, seed: 8, layers: 3, autoSpeed: 4, tailSec: 0.5, endDelay: 500 });
   await p.locator('#btnRec').click();
   await p.waitForTimeout(300);
   const s0 = await state(p);

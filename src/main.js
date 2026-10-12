@@ -8,7 +8,7 @@ import { createAERecorder } from './ae/recorder.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 16;
+const SETTINGS_VERSION = 17;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -99,6 +99,7 @@ function migrate(j, fromStorage = false) {
     const clean = o => { if (o) for (const [k, olds] of Object.entries(OLD_P)) if (k in o && olds.some(v => String(v).toLowerCase() === String(o[k]).toLowerCase())) delete o[k]; };
     clean(j); if (j.themeStore && typeof j.themeStore === 'object') Object.values(j.themeStore).forEach(clean);
   }
+  // v17：新增手指避让与消除动画图层顺序设置；新键直接取默认值（DEFAULTS 合并），自定义/导入值原样保留，无需改写旧键
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -598,6 +599,9 @@ function matchSelected() {
   } else { // 参考视频：无论牌在哪，都飞到画面固定位置（默认画面中部偏下）并排消除
     mx = VP.x + VP.w * S.meetX; my = VP.y + VP.h * S.meetY;
   }
+  // v16：中央碰撞区（自动通关时手指需避开）。持续到碰撞+爆开结束
+  const zt = performance.now();
+  G.clearZone = { x: mx, y: my, t0: zt, until: zt + S.flyDuration + S.burstDuration + (S.handAvoidHold || 0), w: w * n };
   const order = sps.map((s, i) => i).sort((a, b) => sps[a].x - sps[b].x);
   const ease = EASES[S.flyEase] || EASES.sine;
   const flights = order.map((si, rank) => {
@@ -840,15 +844,66 @@ function rgbToHex(c) { const r = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(c); ret
 // ---------------- Hand ----------------
 const HAND = { x: 0, y: 0, press: 0, visible: false, alpha: 0 };
 function resetHand() { HAND.x = W * 0.82; HAND.y = H * 1.15; HAND.press = 0; }
-function handMoveTo(x, y, dur) {
+function handMoveTo(x, y, dur, via = null) {
   const fx = HAND.x, fy = HAND.y;
   const dx = x - fx, dy = y - fy, dist = Math.hypot(dx, dy);
   const bend = (Math.random() < 0.5 ? -1 : 1) * S.curve * dist * rand(0.4, 1);
-  const cx = (fx + x) / 2 - dy / (dist || 1) * bend, cy = (fy + y) / 2 + dx / (dist || 1) * bend;
+  let cx = (fx + x) / 2 - dy / (dist || 1) * bend, cy = (fy + y) / 2 + dx / (dist || 1) * bend;
+  if (via) { cx = 2 * via.x - (fx + x) / 2; cy = 2 * via.y - (fy + y) / 2; } // 二次曲线在中点经过 via（绕开碰撞区）
   return tween(dur, k => {
     const a = (1 - k) * (1 - k), b = 2 * (1 - k) * k, c = k * k;
     HAND.x = a * fx + b * cx + c * x; HAND.y = a * fy + b * cy + c * y;
   }, easeInOut);
+}
+// ---- v16：自动通关时手指避让中央碰撞区 ----
+const zoneActive = () => !!(G && G.clearZone && S.handAvoid && performance.now() < G.clearZone.until);
+function avoidRadius() { return Math.max(0, S.handAvoidRadius) * W; }
+// 手指图片主体（不是指尖）的中心相对指尖的偏移：手指图从指尖向下/侧方延伸
+function handBodyOffset() {
+  const im = IMG.handImage; if (!im) return { x: 0, y: 0, r: 0 };
+  const w = W * S.handSize, h = w * im.height / im.width, f = S.handFlip ? -1 : 1;
+  return { x: f * (0.5 - S.handAnchorX) * w, y: (0.5 - S.handAnchorY) * h, r: Math.min(w, h) * 0.3 };
+}
+// 指尖位于 (x,y) 时手指主体离碰撞中心的“侵入量”（>0 表示挡住）
+function zoneIntrude(x, y, z = G.clearZone) {
+  const o = handBodyOffset(), R = avoidRadius();
+  const dTip = Math.hypot(x - z.x, y - z.y), dBody = Math.hypot(x + o.x - z.x, y + o.y - z.y);
+  return Math.max(R * 0.75 - dTip, R + o.r - dBody);
+}
+function avoidPoint() {
+  const z = G.clearZone, o = handBodyOffset(), R = avoidRadius();
+  const mode = S.handAvoidDir || 'auto';
+  let dirs;
+  const v = { x: HAND.x - z.x, y: Math.min(HAND.y, H) - z.y };
+  if (mode === 'down') dirs = [[0, 1]];
+  else if (mode === 'left') dirs = [[-0.75, 0.66]];
+  else if (mode === 'right') dirs = [[0.75, 0.66]];
+  else { // auto：朝手指当前所在一侧（最近的侧边），并偏向下方角落（手掌本来就在指尖下方，移动距离最短也最自然）
+    const sx = Math.abs(v.x) > 2 ? Math.sign(v.x) : (z.x < W / 2 ? 1 : -1);
+    dirs = [[sx * 0.8, 0.6], [sx * 0.45, 0.9], [0, 1], [-sx * 0.8, 0.6]];
+  }
+  const clampX = x => Math.max(W * 0.06, Math.min(W * 0.94, x)), clampY = y => Math.max(VP.y + H * 0.04, Math.min(H * 1.02, y));
+  for (const [ux, uy] of dirs) {
+    const l = Math.hypot(ux, uy), nx = ux / l, ny = uy / l;
+    for (let k = 1; k < 3.5; k += 0.25) { // 沿该方向找最近的不挡住位置
+      const bx = z.x + nx * (R + o.r) * k, by = z.y + ny * (R + o.r) * k; // 主体中心
+      const p = { x: clampX(bx - o.x + rand(-0.03, 0.03) * W), y: clampY(by - o.y + rand(-0.02, 0.02) * H) };
+      if (zoneIntrude(p.x, p.y) <= 0) return p;
+    }
+  }
+  return { x: z.x < W / 2 ? W * 0.9 : W * 0.1, y: H * 1.02 };
+}
+// 指尖从当前位置到 (x,y) 的路径若穿过碰撞区，返回一个绕行点
+function routeAround(x, y) {
+  if (!zoneActive()) return null;
+  const z = G.clearZone, fx = HAND.x, fy = HAND.y, R = avoidRadius(), o = handBodyOffset();
+  let hit = false;
+  for (let i = 1; i < 10; i++) { const k = i / 10; if (zoneIntrude(fx + (x - fx) * k, fy + (y - fy) * k) > 0) { hit = true; break; } }
+  if (!hit) return null;
+  const mx = (fx + x) / 2, my = (fy + y) / 2; let nx = mx - z.x - o.x * 0.5, ny = my - z.y - o.y * 0.5; // 从中心向外推中点
+  let l = Math.hypot(nx, ny); if (l < 1) { nx = -(y - fy); ny = x - fx; l = Math.hypot(nx, ny) || 1; if (ny < 0) { nx = -nx; ny = -ny; } }
+  const d = (R + o.r) * 1.25;
+  return { x: z.x + nx / l * d - o.x * 0.5, y: z.y + ny / l * d - o.y * 0.5 };
 }
 function addRipple(x, y) { if (G && S.tapRipple) G.ripples.push({ x, y, t0: performance.now() }); }
 async function handPress(onDown, spd = 1) {
@@ -897,17 +952,97 @@ async function autoSolve() {
     const j = S.jitter * U;
     const tx = sc.x + Math.max(-sc.w * 0.3, Math.min(sc.w * 0.3, rand(-j, j)));
     const ty = sc.y + Math.max(-sc.h * 0.3, Math.min(sc.h * 0.3, rand(-j, j)));
-    const dist = Math.hypot(tx - HAND.x, ty - HAND.y);
+    // v16：碰撞区仍在爆开时，先在区外等它结束（'zone' 模式只在目标牌本身在区内时等，否则绕开碰撞区直接去）
+    if (zoneActive() && (S.handAvoidWait !== 'zone' || zoneIntrude(tx, ty) > 0)) {
+      // 速度倍率 >1 时等待按比例缩短（剩余时间改为绕行），保证“整体速度倍率”仍然有效
+      const z = G.clearZone, until = spd > 1 && zoneIntrude(tx, ty) <= 0 ? z.t0 + (z.until - z.t0) / spd : z.until;
+      while (zoneActive() && G.clearZone === z && performance.now() < until && alive()) await sleep(40);
+      await sleep(rand(40, 140) / spd); if (!alive()) return false;
+    }
+    const via = routeAround(tx, ty);
+    const dist = Math.hypot(tx - HAND.x, ty - HAND.y) * (via ? 1.25 : 1);
     const base = rand(S.moveMin, Math.max(S.moveMin, S.moveMax));
     const dur = base * (0.55 + Math.min(1, dist / (H * 0.5)) * 0.6) / spd;
-    await handMoveTo(tx, ty, dur);
+    await handMoveTo(tx, ty, dur, via);
     if (!alive()) return false;
     await sleep(rand(15, 60) / spd);
-    const ok = await handPress(() => clickTile(t, true), spd);
+    const z0 = G.clearZone;
+    let follow = null, t1 = 0;
+    // v17：点下的那一刻就知道这一下会配对（两牌将飞向中央）→ 抬指的同时开始“顺势离开”，与松开动作连成一个动作（参考视频：点击后 0 ms 起步，约 0.45 s 内离开）
+    const ok = await handPress(() => {
+      const r = clickTile(t, true);
+      if (S.handAvoid && G.clearZone && G.clearZone !== z0) { t1 = performance.now(); follow = followThrough(); }
+      return r;
+    }, spd);
+    if (follow) await follow;
+    if (!alive()) return false;
     let d = rand(S.delayMin, Math.max(S.delayMin, S.delayMax));
     if (Math.random() < S.thinkChance) d += rand(0.3, 1) * S.thinkMax;
+    if (t1) d = Math.max(0, d - (performance.now() - t1) * spd);
     await sleep(d / spd);
     return ok;
+  };
+  // v17：配对那一下点下时就规划好抬指后的路线：下一组（此刻就选好）的第一张若在碰撞区外 → 沿绕开碰撞区的弧线朝它去，悬停在它旁边；
+  // 否则（或没有下一组）→ 停到碰撞区旁（自动：朝最近侧边/下方，参考视频里手指退到画面下缘）
+  let planned = null;
+  const followThrough = () => {
+    if (S.handAvoidDir === 'next' || !S.handAvoidDir) planned = choose();
+    let dest = null;
+    if (planned) {
+      const ft = G.tiles[planned.find(id => G.tiles[id].state === 'board') ?? planned[0]], sc = tileScreen(ft);
+      // 悬停点：牌的下方一点（抬起的手指不挡住牌），整只手不进碰撞区
+      for (const k of [0.55, 0.9, 1.3]) {
+        const hx = sc.x + rand(-0.1, 0.1) * sc.w, hy = sc.y + sc.h * k;
+        if (zoneIntrude(hx, hy) <= 0 && zoneIntrude(sc.x, sc.y) <= 0) { dest = { x: hx, y: hy }; break; }
+      }
+    }
+    if (!dest) dest = avoidPoint();
+    // 路线：三次贝塞尔。起步方向 = 从碰撞中心指向手指、并偏向下方（参考：抬指后手往下/往侧边带走），
+    // 末段从碰撞区外侧进入目标；逐点检查，一旦离开碰撞区就不再回到区内
+    const z = G.clearZone, P0 = { x: HAND.x, y: HAND.y }, R = avoidRadius();
+    let ex = P0.x - z.x, ey = P0.y - z.y + R * 0.6; const el = Math.hypot(ex, ey) || 1; ex /= el; ey /= el;
+    if (Math.hypot(P0.x - z.x, P0.y - z.y) < R * 0.15) { ex = Math.sign(dest.x - z.x) * 0.6 || 0.6; ey = 0.8; }
+    let qx = dest.x - z.x, qy = dest.y - z.y; const ql = Math.hypot(qx, qy) || 1; qx /= ql; qy /= ql;
+    let path = null;
+    for (const k of [0.5, 0.8, 1.1, 1.5]) {
+      const P1 = { x: P0.x + ex * R * k, y: P0.y + ey * R * k }, P2 = { x: dest.x + qx * R * k * 0.5, y: dest.y + qy * R * k * 0.5 };
+      let left = false, bad = false;
+      for (let i = 1; i <= 24; i++) { const u = i / 24, x = bez3(P0.x, P1.x, P2.x, dest.x, u), y = bez3(P0.y, P1.y, P2.y, dest.y, u); const inside = zoneIntrude(x, y, z) > 0; if (!inside) left = true; else if (left) { bad = true; break; } }
+      path = { P1, P2 }; if (!bad) break;
+    }
+    let len = 0, lx = P0.x, ly = P0.y; for (let i = 1; i <= 16; i++) { const u = i / 16, x = bez3(P0.x, path.P1.x, path.P2.x, dest.x, u), y = bez3(P0.y, path.P1.y, path.P2.y, dest.y, u); len += Math.hypot(x - lx, y - ly); lx = x; ly = y; }
+    const dur = S.handAvoidDuration * (0.75 + 0.8 * Math.min(1.6, len / (H * 0.5))) * rand(0.92, 1.1) / spd;
+    return tween(dur, k => { HAND.x = bez3(P0.x, path.P1.x, path.P2.x, dest.x, k); HAND.y = bez3(P0.y, path.P1.y, path.P2.y, dest.y, k); }, easeInOut);
+  };
+  // 选下一组（自动通关主循环与“点下时预先规划”共用）
+  const choose = () => {
+      const free = groups.filter(gFree);
+      const letterG = free.filter(isLetterG).sort((a, b) => targetIndex(G.tiles[a[0]].key) - targetIndex(G.tiles[b[0]].key));
+      const normalG = free.filter(g => !isLetterG(g));
+      const allLetters = groups.filter(isLetterG).sort((a, b) => targetIndex(G.tiles[a[0]].key) - targetIndex(G.tiles[b[0]].key));
+      let pick = null;
+      if (letterG.length) {
+        if (S.letterOrder === 'early') pick = letterG[0];
+        else if (S.letterOrder === 'word') { if (letterG[0] === allLetters[0]) pick = letterG[0]; }
+        else if (S.letterOrder === 'natural') { if (Math.random() < (G.letterPairs ? 0.6 : 0.15)) pick = letterG[Math.floor(Math.random() * letterG.length)]; }
+      }
+      if (!pick && normalG.length) {
+        const hp = { x: HAND.x, y: Math.min(HAND.y, H) };
+        let best = Infinity, pool = normalG;
+        if (targetsLeft() && S.letterOrder !== 'late') {
+          const need = neededSet(); const helpful = normalG.filter(g => g.some(id => need.has(id)));
+          if (helpful.length && Math.random() >= S.extraPairChance) pool = helpful;
+        }
+        for (const g of pool) {
+          const sorted = g.slice().sort((a, b) => dScreen(a, hp) - dScreen(b, hp));
+          let sc = dScreen(sorted[0], hp);
+          for (let i = 1; i < sorted.length; i++) sc += dScreen(sorted[i], tileScreen(G.tiles[sorted[i - 1]])) * 0.6;
+          sc *= rand(0.75, 1.25);
+          if (sc < best) { best = sc; pick = sorted; }
+        }
+      }
+      if (!pick && letterG.length) pick = letterG[0];
+      return pick;
   };
   const dScreen = (id, p) => { const s = tileScreen(G.tiles[id]); return Math.hypot(s.x - p.x, s.y - p.y); };
   let stuck = 0;
@@ -921,32 +1056,8 @@ async function autoSolve() {
   };
   while (groups.length && alive()) {
     if (wordWin && !targetsLeft()) break;
-    const free = groups.filter(gFree);
-    const letterG = free.filter(isLetterG).sort((a, b) => targetIndex(G.tiles[a[0]].key) - targetIndex(G.tiles[b[0]].key));
-    const normalG = free.filter(g => !isLetterG(g));
-    const allLetters = groups.filter(isLetterG).sort((a, b) => targetIndex(G.tiles[a[0]].key) - targetIndex(G.tiles[b[0]].key));
-    let pick = null;
-    if (letterG.length) {
-      if (S.letterOrder === 'early') pick = letterG[0];
-      else if (S.letterOrder === 'word') { if (letterG[0] === allLetters[0]) pick = letterG[0]; }
-      else if (S.letterOrder === 'natural') { if (Math.random() < (G.letterPairs ? 0.6 : 0.15)) pick = letterG[Math.floor(Math.random() * letterG.length)]; }
-    }
-    if (!pick && normalG.length) {
-      const hp = { x: HAND.x, y: Math.min(HAND.y, H) };
-      let best = Infinity, pool = normalG;
-      if (targetsLeft() && S.letterOrder !== 'late') {
-        const need = neededSet(); const helpful = normalG.filter(g => g.some(id => need.has(id)));
-        if (helpful.length && Math.random() >= S.extraPairChance) pool = helpful;
-      }
-      for (const g of pool) {
-        const sorted = g.slice().sort((a, b) => dScreen(a, hp) - dScreen(b, hp));
-        let sc = dScreen(sorted[0], hp);
-        for (let i = 1; i < sorted.length; i++) sc += dScreen(sorted[i], tileScreen(G.tiles[sorted[i - 1]])) * 0.6;
-        sc *= rand(0.75, 1.25);
-        if (sc < best) { best = sc; pick = sorted; }
-      }
-    }
-    if (!pick && letterG.length) pick = letterG[0];
+    let pick = planned && groups.some(g => g.length === planned.length && g.every(id => planned.includes(id))) && gFree(planned) ? planned : choose();
+    planned = null;
     if (!pick) { if (++stuck > 30) { toast('自动通关卡住了，请重新开始'); break; } await sleep(150); continue; }
     stuck = 0;
     groups.splice(groups.findIndex(g => g.every(id => pick.includes(id)) && g.length === pick.length), 1);
@@ -1215,6 +1326,15 @@ function drawDisclaimer() {
   ctx.fillStyle = S.disclaimerColor; ctx.globalAlpha = 0.85; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(S.disclaimer, 0, 0); ctx.restore(); ctx.direction = 'ltr';
 }
+// v16：配对飞行/碰撞中的牌（z 5.x）属于消除动画；托盘牌（z 0）与飞向字母槽的字母（z 6）不算
+const isClearSprite = sp => sp.z >= 5 && sp.z < 6;
+function drawSprites(pred) {
+  for (const sp of G.sprites.filter(pred).sort((a, b) => a.z - b.z)) {
+    const sw = sp.w * sp.scale * (sp.sx || 1), sh = sp.h * sp.scale * (sp.sy || 1);
+    if (sp.rot) { ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.rot * Math.PI / 180); drawTile2D(sp.key, 0, 0, sw, sh, sp.alpha, sp.tint ? 1 : 0); ctx.restore(); }
+    else drawTile2D(sp.key, sp.x, sp.y, sw, sh, sp.alpha, sp.tint ? 1 : 0);
+  }
+}
 function drawEffects(now) {
   // 碰撞接缝闪光：沿两牌接触线的一道白色光带，约 220 ms 淡出
   G.seams = (G.seams || []).filter(f => {
@@ -1227,7 +1347,7 @@ function drawEffects(now) {
     const q = flashState(f, now); if (!q) return false;
     drawFlash(f.x, f.y, q.r, q.a); return true;
   });
-  drawParticlesAndRipples(now);
+  drawParticles(now);
 }
 function seamState(f, now) {
   const k = (now - f.t0) / 240; if (k >= 1) return null;
@@ -1255,7 +1375,7 @@ function drawFlash(x, y, rad, a) {
   g.addColorStop(0, `rgba(255,255,220,${0.8 * a})`); g.addColorStop(0.4, `rgba(${c.join(',')},${0.5 * a})`); g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, rad, 0, 7); ctx.fill();
 }
-function drawParticlesAndRipples(now) {
+function drawParticles(now) {
   // 粒子（贴图批量绘制）
   const blur = S.particleBlur || 0, base = ctx.getTransform(); // 保留外层变换（震屏等）
   G.particles = G.particles.filter(p => {
@@ -1273,6 +1393,8 @@ function drawParticlesAndRipples(now) {
     draw(q, q.alpha);
     ctx.restore(); return true;
   });
+}
+function drawRipples(now) {
   // 点击波纹
   G.ripples = G.ripples.filter(r => {
     const q = rippleState(r, now); if (!q) return false;
@@ -1468,6 +1590,7 @@ function frame() {
   }
   HAND.alpha += ((HAND.visible ? 1 : 0) - HAND.alpha) * Math.min(1, dt * 12);
   // draw
+  const clearAbove = S.clearAnimLayer !== 'belowHand';
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawBackground();
   if (G && G.shake) { const k = (now - G.shake.t0) / 220; if (k >= 1) G.shake = null; else { const a = G.shake.amp * (1 - k); ctx.setTransform(1, 0, 0, 1, Math.sin(k * 60) * a, Math.cos(k * 47) * a * 0.6); } }
@@ -1479,18 +1602,15 @@ function frame() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   drawTopBar(now);
   if (G) {
-    // 托盘内的牌
-    const sorted = G.sprites.slice().sort((a, b) => a.z - b.z);
-    for (const sp of sorted) {
-      const sw = sp.w * sp.scale * (sp.sx || 1), sh = sp.h * sp.scale * (sp.sy || 1);
-      if (sp.rot) { ctx.save(); ctx.translate(sp.x, sp.y); ctx.rotate(sp.rot * Math.PI / 180); drawTile2D(sp.key, 0, 0, sw, sh, sp.alpha, sp.tint ? 1 : 0); ctx.restore(); }
-      else drawTile2D(sp.key, sp.x, sp.y, sw, sh, sp.alpha, sp.tint ? 1 : 0);
-    }
-    drawEffects(now);
+    // 托盘内的牌（消除动画的飞行牌按设置画在手指之上或之下）
+    drawSprites(sp => !isClearSprite(sp));
+    if (!clearAbove) { drawSprites(isClearSprite); drawEffects(now); }
+    drawRipples(now);
   }
   drawDisclaimer();
   if (G) drawEndCard(now);
   drawHand();
+  if (G && clearAbove) { drawSprites(isClearSprite); drawEffects(now); } // v16：消除动画（飞行/碰撞牌、接缝光、树叶）在手指之上
   if (REC.rec) updateRecTime();
   if (AE.active()) { AE.sample(now); updateAEButtons(); }
   requestAnimationFrame(frame);
@@ -1793,7 +1913,7 @@ window.__app = {
   setTheme, resetTheme, THEMES, get theme() { return S.theme; }, faceCanvas, drawTile2DTo(c2d, ...a) { const old = ctx; ctx = c2d; try { drawTile2D(...a); } finally { ctx = old; } },
   drawPart(c2d, fn, ...args) { const old = ctx; ctx = c2d; try { ({ drawEndCard, drawTopBar, drawBackground })[fn](...args); } finally { ctx = old; } },
   AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
-  get S() { return S; }, get G() { return G; }, get AUTO() { return AUTO; }, get REC() { return REC; },
+  get S() { return S; }, get G() { return G; }, get HAND() { return HAND; }, zoneIntrude, avoidRadius, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
   newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, spawnParticles, particleState, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
 };

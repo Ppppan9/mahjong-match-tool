@@ -19,7 +19,7 @@ async function open(saved) {
 }
 const P = p => p.evaluate(() => { const S = __app.S; return { v: S.settingsVersion, theme: S.theme, n: S.particleCount, c1: S.particleColor, c2: S.particleColor2, size: S.particleSize, life: S.particleLife }; });
 { // 新存档
-  const { p, ctx } = await open(null);
+  const { p, ctx } = await open({ settingsVersion: 17, theme: 'guofeng', layers: 3 }); // v15.2 起默认主题为中东风，这里显式测国风
   const s = await P(p);
   check('新存档国风：粒子默认 36 片、v15 配色', s.n === 36 && s.c1 === '#25603a' && s.v >= 15, s);
   // 一次爆开：数量、发射时间、翻转、尺寸差异

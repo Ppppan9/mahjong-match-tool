@@ -45,7 +45,7 @@ const SNAPS = []; for (let f = 6; f < 4000; f += 9) SNAPS.push(f);
 let dl = page.waitForEvent('download', { timeout: 900000 });
 const infoA = await page.evaluate(async ({ SNAPS }) => {
   const wait = window.__wait;
-  __app.S.autoRec = false; __app.S.autoStop = false;
+  __app.S.autoRec = false; __app.S.autoStop = false; __app.S.handAvoidWait = 'zone'; __app.S.layers = 3; // v17：3 层控制时长；避让开启，但不在区外整段等待，控制测试时长
   __vtOn();
   __app.newGame(true);
   __app.aeStart({ snapAt: SNAPS });

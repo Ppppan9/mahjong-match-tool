@@ -22,7 +22,7 @@ const info = await page.evaluate(() => ({ tiles: __app.G.tiles.length, word: __a
 console.log('board', info);
 if (mode === 'quick') { console.log('errors', errors); await browser.close(); process.exit(0); }
 // 加速自动通关；自动通关默认不再自动录制（v14.1）→ 先点「开始录制」，通关后自动停止并下载
-await page.evaluate(() => { __app.setSetting('autoSpeed', 2.5); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); __app.setSetting('layers', 3); }); // v15.2 默认 8 层（240 张）太慢，录制流程用 3 层
+await page.evaluate(() => { __app.setSetting('autoSpeed', 4); __app.setSetting('tailSec', 0.5); __app.setSetting('endDelay', 500); __app.setSetting('layers', 3); }); // v15.2 默认 8 层（240 张）太慢，录制流程用 3 层
 const dlP = page.waitForEvent('download', { timeout: 400000 });
 await page.click('#btnRec');
 await page.click('#btnAuto');
@@ -37,7 +37,7 @@ await page.waitForFunction(() => __app.G.cleared, null, { timeout: 240000 });
 const dl = await dlP;
 const out = path.join(root, 'sample_recording' + path.extname(dl.suggestedFilename()));
 await dl.saveAs(out);
-console.log('recording', dl.suggestedFilename(), fs.statSync(out).size);
+console.log('t', Math.round(performance.now() / 1000)); console.log('recording', dl.suggestedFilename(), fs.statSync(out).size);
 await page.locator('#stage').screenshot({ path: path.join(shots, '05_end_card.jpg') });
 await page.screenshot({ path: path.join(shots, '06_full_ui_with_panel.jpg') });
 await page.locator('#panel').screenshot({ path: path.join(shots, '07_control_panel.jpg') });
@@ -47,7 +47,7 @@ const res = await page.evaluate(async () => {
   for (const cfg of [{ trayMode: 'pair', matchCount: 2, winCondition: 'clear' }, { trayMode: 'pair', letterMode: 'single', winCondition: 'word' }, { trayMode: 'tray', matchCount: 2 }, { trayMode: 'pair', matchCount: 3, layers: 5, gapX: 0.2, offsetX: 0.25, offsetY: 0.5 }, { trayMode: 'tray', matchCount: 3, altOffset: true, shrinkCols: 0, shrinkRows: 0 }, { trayMode: 'pair', stackMode: 'offset', offsetX: 0.25, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'base', insetX: 0.5, insetY: 0.5, layers: 4, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 0, insetY: 1, layers: 3, winCondition: 'clear' }, { trayMode: 'pair', stackGridRef: 'top', insetX: -1, insetY: 0, rowStagger: 0.5, winCondition: 'clear' }, { trayMode: 'pair', insetX: 1, insetY: 1, layers: 4, baseCols: 7, baseRows: 8, winCondition: 'clear' }, { trayMode: 'pair', layers: 5, baseCols: 7, baseRows: 8, winCondition: 'word' }]) {
     __app.S.stackMode = 'centered'; __app.S.stackGridRef = 'base'; __app.S.insetX = 0.5; __app.S.insetY = 0.5; __app.S.rowStagger = 0;
     for (const [k, v] of Object.entries(cfg)) __app.S[k] = v;
-    __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
+    __app.S.autoRec = false; __app.S.autoSpeed = 6; __app.S.flyDuration = 150; __app.S.moveMin = 60; __app.S.moveMax = 80; __app.S.delayMin = 0; __app.S.delayMax = 10; __app.S.thinkChance = 0; __app.S.endCard = false; __app.S.handAvoid = false; /* 逻辑测试不需要手指避让（省时） */ if (!cfg.layers) __app.S.layers = 3; __app.S.baseCols = 6; __app.S.baseRows = 6;
     __app.newGame(true);
     const n = __app.G.tiles.length;
     const t0 = performance.now();
