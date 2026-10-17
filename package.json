@@ -19,6 +19,7 @@
   "devDependencies": {
     "acorn": "^8.19.0",
     "esbuild": "^0.25.0",
+    "gltf-validator": "^2.0.0-dev.3.10",
     "playwright-core": "^1.48.0",
     "three": "0.160.0"
   }

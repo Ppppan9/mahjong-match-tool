@@ -212,7 +212,7 @@ export const DEFAULTS = {
   handAvoidWait: 'burst',
   handAvoidHold: 120,
   clearAnimLayer: 'aboveHand',
-  settingsVersion: 19,
+  settingsVersion: 20,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -231,6 +231,10 @@ export const DEFAULTS = {
   aeNames: 'zh',
   aeAudio: 'both',
   aeSaveAep: true,
+  // v20：导出 3D 动画（glTF/FBX/Blender）
+  export3dFps: 30,
+  export3dParticles: true,
+  export3dHand: true,
   // 结束页
   endCard: true,
   endCardHand: false, // v19：结尾页默认不显示手指（含自动通关点按钮动画）；可在面板打开
@@ -507,6 +511,12 @@ export const SCHEMA = [
     S('aeNames', '图层命名', [['zh', '中文'], ['en', 'English']]),
     S('aeAudio', '音频', [['both', '混合音轨 + 逐事件音效层'], ['mixed', '仅混合音轨'], ['events', '仅逐事件音效层'], ['none', '不导出音频']]),
     B('aeSaveAep', '脚本跑完后提示另存为 .aep'),
+  ]},
+  { group: '导出 3D 动画（UE5 / C4D / Blender）', open: true, items: [
+    { k: '_export3d', label: '用上一次 AE 记录生成 glTF 场景 + Blender 脚本 + 音频', type: 'button', action: 'export3d', text: '导出 3D 动画 (glTF/FBX/Blender)' },
+    S('export3dFps', '3D 动画帧率', [[24, '24'], [25, '25'], [30, '30'], [60, '60']], { num: true }),
+    B('export3dParticles', '包含树叶/花瓣粒子（烘焙成带贴图的小平面）'),
+    B('export3dHand', '包含手指（贴图平面；结束页是否显示仍按“结束页显示手指”）'),
   ]},
   { group: '结束页(End Card)', items: [
     B('endCard', '显示结束页'),

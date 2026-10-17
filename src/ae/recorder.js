@@ -476,7 +476,7 @@ export function createAERecorder(api) {
       ...assetFiles.sort((a, b) => a.name < b.name ? -1 : 1), ...audioFiles,
     ];
     const blob = makeZip(files);
-    return { blob, name: `mahjong_ae_export_${stamp}.zip`, timeline, stats, files: files.length, snaps: rec.snaps.map(s => ({ t: s.t, frame: s.frame })) };
+    return { blob, name: `mahjong_ae_export_${stamp}.zip`, timeline, stats, files: files.length, fileList: files, snaps: rec.snaps.map(s => ({ t: s.t, frame: s.frame })) };
   }
 
   return { start, stop, sample, onTap, exportZip, active, elapsed, get rec() { return R; } };

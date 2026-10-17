@@ -109,6 +109,15 @@ three.js 为 MIT 协议，详见 `THIRD_PARTY_LICENSES.txt`。牌面与图形均
 - `npm run test:ae:mideast`：中东风主题下导出 AE 工程 + 模拟 AE 执行脚本 + 按图层重新合成对比（`screenshots/ae_export_check_mideast.jpg`）。
 - `npm run test:logic`：棋盘生成/求解与修复测试（用 esbuild 打包后在 Node 中运行，因为 `faces.js` 依赖内置字体文件）。
 
+## v20 新功能：导出 3D 动画（glTF / FBX / Blender，支持 UE5 / C4D）
+
+1. 先用面板「导出 AE 工程」的 **● 开始记录** 记录一段（自动通关或手动游玩），停止后到面板「导出 3D 动画（UE5 / C4D / Blender）」点 **导出 3D 动画 (glTF/FBX/Blender)**。
+2. 下载的 `mahjong_3d_export_时间.zip` 包含 `scene.glb`（每张牌是真实 3D 网格 + 牌面贴图，2D 元素是带贴图的平面，一个动画剪辑）、
+   `blender_import.py`（Blender 4.x 一键导入、设置相机/帧率/分辨率/自发光材质/音效，`--fbx` 导出 `scene.fbx`）、`scene3d.json`、`timeline.json`、`audio/*.wav`、`README_3D.md`（中文导入说明）。
+3. 单位：1 画布像素 = 1 mm，Y 轴向上；显示/隐藏用 STEP 缩放 1/0，淡入淡出曲线在 `scene3d.json`（Blender 脚本自动烘到材质 Alpha）。
+4. 设置（v20，只新增默认值）：3D 动画帧率（默认 30）、包含粒子、包含手指。
+5. 测试：`node test/export3d.mjs`（gltf-validator 校验 + 网格/通道/时长检查）；`bash test/export3d-blender.sh`（Blender 无头导入、渲染、PSNR 对比、生成 FBX，对比图 `screenshots/export3d_blender_compare.jpg`）。
+
 ## v12 新功能：导出 After Effects 工程（每张牌、每个动画都是独立图层）
 
 **结论（调研见 `docs/AE_EXPORT_RESEARCH.md`）**：`.aep` 是未公开的二进制 RIFX 格式，`.aepx` 里的图层/关键帧也是十六进制二进制块，都无法可靠地直接生成；因此本工具导出一个**工程包 ZIP**，在 AE 里运行其中的 ExtendScript 脚本，由 AE 自己用官方脚本 API 建出完整工程，再另存为 `.aep`。

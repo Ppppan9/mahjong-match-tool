@@ -1,6 +1,7 @@
 node_modules
 ref/*
 !ref/ANALYSIS.md
+!ref/EXPORT3D_NOTES.md
 dist/
 *.mp4
 *.webm

@@ -5,10 +5,11 @@ import { loadFonts, FONT_LOGO, FONT_AR } from './fonts.js';
 import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
+import { export3D } from './export3d/export3d.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 19;
+const SETTINGS_VERSION = 20;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -103,6 +104,7 @@ function migrate(j, fromStorage = false) {
   // v18：手指避让默认改为关。本地存档若仍是旧默认 handAvoid===true → 改为 false；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 18 && j.handAvoid === true) j.handAvoid = false;
   // v19：新增 endCardHand（默认 false）。新键取 DEFAULTS；自定义/导入值原样保留，无需改写旧键
+  // v20：新增 3D 动画导出设置（export3dFps / export3dParticles / export3dHand）。只补默认值，旧键原样保留
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -378,6 +380,27 @@ function roundedShape(w, h, r) {
   s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
   return s;
 }
+function makeBodyGeo(shape, thick) {
+  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false, curveSegments: 6, steps: 12 });
+  const pos = bodyGeo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) { c.setStyle(sideGrad(1 - pos.getZ(i) / thick)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+  bodyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return bodyGeo;
+}
+// v20：3D 导出用的牌几何/参数（与 buildMeshes 同一套尺寸、颜色）
+function tile3D() {
+  const tw = G.tw, th = G.th, thick = S.tileThick, shSp = Math.max(0.2, S.shadowSpread ?? 1), lsw = Math.max(0.001, S.leftShadowWidth) * tw;
+  return {
+    bodyGeo: makeBodyGeo(roundedShape(tw * 0.995, th * 0.995, S.cornerRadius), thick), tw, th, thick, selectTint: S.selectTint,
+    shadow: { canvas: shadowTex.image, w: tw * (1 + 0.42 * shSp), h: th * (1 + 0.36 * shSp), dx: S.shadowDX * tw, dy: -S.shadowDY * tw, opacity: S.shadowStrength },
+    band: S.leftShadow > 0 ? { canvas: leftShadowTex.image, w: lsw, h: th * 0.97, x: -tw * 0.4975 - lsw / 2 + tw * 0.01, opacity: S.leftShadow } : null,
+  };
+}
+// 牌顶 → 牌底在屏幕上的偏移（px），即 2.5D 剪切露出侧面的量
+function tileShear() {
+  const t = G.tiles[0], a = project(wX(t), wY(t), (t.layer + 1) * S.tileThick), b = project(wX(t), wY(t), t.layer * S.tileThick);
+  return { dx: b.x - a.x, dy: b.y - a.y };
+}
 function buildMeshes() {
   boardGroup.traverse(o => { if (o.isMesh) { o.material.dispose(); } });
   scene.remove(boardGroup);
@@ -390,10 +413,7 @@ function buildMeshes() {
   const tw = G.tw, th = G.th, thick = S.tileThick;
   const shape = roundedShape(tw * 0.995, th * 0.995, S.cornerRadius);
   // 牌身：一体挤出，按高度上顶点色渐变（牌面边缘白→灰→浅绿底座→深绿），与参考视频的侧面/底座过渡一致
-  const bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: thick, bevelEnabled: false, curveSegments: 6, steps: 12 });
-  { const pos = bodyGeo.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) { c.setStyle(sideGrad(1 - pos.getZ(i) / thick)); col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
-    bodyGeo.setAttribute('color', new THREE.BufferAttribute(col, 3)); }
+  const bodyGeo = makeBodyGeo(shape, thick);
   const faceGeo = new THREE.PlaneGeometry(tw * 0.995, th * 0.995); faceGeo.translate(0, 0, thick + 0.003);
   const shSp = Math.max(0.2, S.shadowSpread ?? 1), shGeo = new THREE.PlaneGeometry(tw * (1 + 0.42 * shSp), th * (1 + 0.36 * shSp));
   // 向左投在相邻牌面上的柔和阴影（参考视频每张牌左侧邻牌的右缘都有一条渐暗带）
@@ -1929,7 +1949,24 @@ async function aeExport(rec = aeLastRec) {
     return window.__lastAEExport;
   } catch (e) { console.error(e); toast('导出失败：' + e.message); return null; }
 }
+// v20：导出 3D 动画（glTF/FBX/Blender）。复用 AE 记录（同一时间轴），没有记录时提示先记录
+async function export3DZip(rec = aeLastRec) {
+  if (!rec) { toast('请先用“开始记录”记录一段（自动通关或手动游玩）'); return null; }
+  toast('正在生成 3D 动画包（glTF）…');
+  try {
+    const fps = +S.export3dFps || 30;
+    const S2 = { ...S, aeFps: fps, aeSize: 'canvas', aeSampling: 'bake', aeGroupLayers: true, aeNames: 'en', aeAudio: 'both', aeLeaves: S.export3dParticles === false ? 'off' : 'layers' };
+    const ae = await AE.exportZip(S2, rec);
+    const r = await export3D({ S, rec, aeResult: ae, api: { tile3D, tileShear, tileScreen, faceCanvas: (k, sel) => sel ? faceCanvasSel(k) : faceCanvas(k) } });
+    const url = URL.createObjectURL(r.blob);
+    const a = document.createElement('a'); a.href = url; a.download = r.name; document.body.appendChild(a); a.click(); a.remove();
+    window.__last3DExport = { name: r.name, url, size: r.blob.size, stats: r.stats, duration: r.duration, fps: r.fps, glbSize: r.glbSize, snaps: ae.snaps };
+    toast(`3D 动画已导出：${r.name}（${(r.blob.size / 1048576).toFixed(1)} MB，${r.stats.tiles} 张牌，${r.stats.quads} 个平面）`);
+    return window.__last3DExport;
+  } catch (e) { console.error(e); toast('3D 导出失败：' + e.message); return null; }
+}
 const BUTTON_ACTIONS = {
+  export3d: () => export3DZip(),
   aeToggle: () => AE.active() ? aeStopAndExport() : aeStart(),
   aeExport: () => aeExport(),
   resetTheme: () => resetTheme(),
@@ -1944,7 +1981,7 @@ function updateAEButtons() {
 window.__app = {
   setTheme, resetTheme, THEMES, get theme() { return S.theme; }, faceCanvas, drawTile2DTo(c2d, ...a) { const old = ctx; ctx = c2d; try { drawTile2D(...a); } finally { ctx = old; } },
   drawPart(c2d, fn, ...args) { const old = ctx; ctx = c2d; try { ({ drawEndCard, drawTopBar, drawBackground })[fn](...args); } finally { ctx = old; } },
-  AE, aeStart, aeStopAndExport, aeExport, get aeLastRec() { return aeLastRec; },
+  AE, aeStart, aeStopAndExport, aeExport, export3DZip, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get HAND() { return HAND; }, zoneIntrude, avoidRadius, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
   newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, spawnParticles, particleState, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
