@@ -214,7 +214,7 @@ export const DEFAULTS = {
   handAvoidWait: 'burst',
   handAvoidHold: 120,
   clearAnimLayer: 'aboveHand',
-  settingsVersion: 20,
+  settingsVersion: 21,
   // 录制
   recRes: '720x1280',
   recFps: 30,

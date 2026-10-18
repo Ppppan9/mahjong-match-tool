@@ -1728,7 +1728,7 @@ function onSetting(item, v) {
   else if (item.kind === 'res') { if (REC.rec) { toast('录制中不能修改分辨率'); return; } setResolution(); if (G) { G.sprites.forEach(s => { }); } newGame(true); }
   else { if (['cameraTilt', 'cameraFov', 'boardScale', 'boardOffsetY', 'boardOffsetX', 'cameraOrtho', 'sideRevealX', 'sideRevealY', 'centerOn'].includes(item.k)) { if (G) applyShear(); fitCamera(); } if (item.k === 'topBarHeight') layoutViewport(); if ((item.k === 'blockedDarken' || item.k === 'depthDarken') && G) refreshDark(); }
   if (item.k.startsWith('hand')) drawHandPreview();
-  if (item.k === 'manualHand') updateCursor();
+  if (item.k === 'manualHand' || item.k === 'hideCursor') updateCursor();
 }
 function fmt(v, step) { return step && step < 1 ? (+v).toFixed(String(step).split('.')[1].length) : v; }
 function buildPanel() {
