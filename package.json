@@ -14,7 +14,8 @@
     "test:tap": "node test/tap-press.mjs",
     "test:norec": "node test/no-auto-rec.mjs",
     "test:particles": "node test/particles.mjs",
-    "shot:burst": "node test/burst-seq.mjs"
+    "shot:burst": "node test/burst-seq.mjs",
+    "test:cursor": "node test/cursor-test.mjs"
   },
   "devDependencies": {
     "acorn": "^8.19.0",

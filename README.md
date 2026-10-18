@@ -109,6 +109,9 @@ three.js 为 MIT 协议，详见 `THIRD_PARTY_LICENSES.txt`。牌面与图形均
 - `npm run test:ae:mideast`：中东风主题下导出 AE 工程 + 模拟 AE 执行脚本 + 按图层重新合成对比（`screenshots/ae_export_check_mideast.jpg`）。
 - `npm run test:logic`：棋盘生成/求解与修复测试（用 esbuild 打包后在 Node 中运行，因为 `faces.js` 依赖内置字体文件）。
 
+## v21：手指出现时隐藏鼠标
+- 新增设置「手指出现时隐藏鼠标」hideCursor（默认开，设置版本 21，只补默认值）：之前只在手动跟随时隐藏鼠标，自动通关时手指和鼠标会同时出现、结束页隐藏手指后鼠标仍被隐藏。现在：手指显示在画面上（手动跟随 / 自动通关手指可见）时画布 cursor:none，面板/按钮上保持鼠标；结束页隐藏手指、关闭手动跟随或未上传手指时恢复鼠标；鼠标隐藏时手指立即出现（不淡入），指尖锚点 = 指针位置。三个工具同名，见 TOOLKIT_STANDARD.md。`npm run test:cursor`。
+
 ## v20 新功能：导出 3D 动画（glTF / FBX / Blender，支持 UE5 / C4D）
 
 1. 先用面板「导出 AE 工程」的 **● 开始记录** 记录一段（自动通关或手动游玩），停止后到面板「导出 3D 动画（UE5 / C4D / Blender）」点 **导出 3D 动画 (glTF/FBX/Blender)**。
