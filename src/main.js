@@ -9,7 +9,7 @@ import { export3D } from './export3d/export3d.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 20;
+const SETTINGS_VERSION = 21;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -105,6 +105,7 @@ function migrate(j, fromStorage = false) {
   if (fromStorage && (j.settingsVersion || 1) < 18 && j.handAvoid === true) j.handAvoid = false;
   // v19：新增 endCardHand（默认 false）。新键取 DEFAULTS；自定义/导入值原样保留，无需改写旧键
   // v20：新增 3D 动画导出设置（export3dFps / export3dParticles / export3dHand）。只补默认值，旧键原样保留
+  // v21：新增 hideCursor（手指出现时隐藏鼠标，默认开）。只补默认值
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -168,7 +169,9 @@ function loadImg(key) {
   im.src = src;
 }
 // 有上传手指且开启“手动时显示手指”时，隐藏系统光标，用手指图片当光标
-function updateCursor() { canvas.style.cursor = (IMG.handImage && S.manualHand) ? 'none' : 'pointer'; }
+// 手指出现在画面上时隐藏系统鼠标（hideCursor，三个工具统一）：手动游玩手指跟随指针（指尖锚点 = 指针位置）/ 自动通关手指可见时；结束页隐藏手指时恢复鼠标
+function handCursorHidden() { return !!(S.hideCursor && IMG.handImage && !endCardHidesHand() && (AUTO.running ? HAND.visible : S.manualHand)); }
+function updateCursor() { const c = handCursorHidden() ? 'none' : 'pointer'; if (canvas.style.cursor !== c) canvas.style.cursor = c; }
 ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg);
 
 // ---------------- Layout ----------------
@@ -1621,6 +1624,7 @@ function frame() {
       if (done && !G.sprites.some(s => s.moving)) { if (!G.winT) G.winT = now; if (now - G.winT > (wordWin ? 1000 : 0)) onCleared(); }
     }
   }
+  updateCursor();
   if (endCardHidesHand(now)) { HAND.visible = false; HAND.alpha = 0; }
   else HAND.alpha += ((HAND.visible ? 1 : 0) - HAND.alpha) * Math.min(1, dt * 12);
   // draw
@@ -1672,13 +1676,13 @@ function pickTile(p) {
 }
 canvas.addEventListener('pointermove', e => {
   if (AUTO.running || !S.manualHand) return;
-  const p = canvasPoint(e); HAND.x = p.x; HAND.y = p.y; HAND.visible = true;
+  const p = canvasPoint(e); HAND.x = p.x; HAND.y = p.y; HAND.visible = true; if (S.hideCursor) HAND.alpha = 1; // 鼠标已隐藏：手指立即出现，不淡入
 });
 canvas.addEventListener('pointerleave', () => { if (!AUTO.running) HAND.visible = false; });
 canvas.addEventListener('pointerdown', e => {
   if (AUTO.running) return;
   const p = canvasPoint(e);
-  if (S.manualHand) { HAND.x = p.x; HAND.y = p.y; HAND.visible = true; handPress(null, 1.5); }
+  if (S.manualHand) { HAND.x = p.x; HAND.y = p.y; HAND.visible = true; if (S.hideCursor) HAND.alpha = 1; handPress(null, 1.5); }
   else addRipple(p.x, p.y);
   const t = pickTile(p);
   if (t) clickTile(t);

@@ -203,6 +203,8 @@ export const DEFAULTS = {
   rippleWidth: 4,
   rippleDuration: 450,
   manualHand: true,
+  // v21：手指出现在画面上时隐藏系统鼠标（三个工具统一 hideCursor）
+  hideCursor: true,
   // v17：自动通关手指避让中央碰撞区 + 消除动画图层顺序
   // v18：手指避让改为滑动开关，默认关闭
   handAvoid: false,
@@ -482,6 +484,7 @@ export const SCHEMA = [
     R('rippleWidth', '波纹线宽', 1, 16, 0.5),
     R('rippleDuration', '波纹时长(ms)', 100, 1500, 10),
     B('manualHand', '手动游玩时手指跟随鼠标(需上传手指)'),
+    B('hideCursor', '手指出现时隐藏鼠标'),
     SW('handAvoid', '手指避让（自动通关配对后避开中央碰撞区）'),
     R('handAvoidRadius', '避让半径(画面宽比例)', 0.05, 0.5, 0.01),
     S('handAvoidDir', '避让方向', [['next', '朝下一张牌(绕开碰撞区，区内则停在旁边)'], ['auto', '停到区旁(最近侧边/下方，同参考)'], ['down', '向下'], ['left', '左下'], ['right', '右下']]),
