@@ -34,7 +34,7 @@ await page.evaluate(() => localStorage.clear()); await page.reload(); await page
 const btnText = await page.evaluate(() => document.getElementById('btn_export3d')?.textContent || [...document.querySelectorAll('button')].map(b => b.textContent).find(t => t.includes('3D')));
 check('按钮存在：导出 3D 动画 (glTF/FBX/Blender)', btnText === '导出 3D 动画 (glTF/FBX/Blender)', btnText);
 const def = await page.evaluate(() => ({ v: __app.S.settingsVersion, fps: __app.S.export3dFps, p: __app.S.export3dParticles, h: __app.S.export3dHand, theme: __app.S.theme, layers: __app.S.layers, hand: !!__app.S.handImage, avoid: __app.S.handAvoid, ech: __app.S.endCardHand }));
-check('默认设置 v20 + 3D 导出默认 + 用户预设保留', def.v === 20 && def.fps === 30 && def.p === true && def.h === true && def.theme === 'mideast' && def.layers === 8 && def.hand && def.avoid === false && def.ech === false, def);
+check('默认设置 v21 + 3D 导出默认 + 用户预设保留', def.v === 21 && def.fps === 30 && def.p === true && def.h === true && def.theme === 'mideast' && def.layers === 8 && def.hand && def.avoid === false && def.ech === false, def);
 const SNAPS = []; for (let f = 45; f < 1500; f += 15) SNAPS.push(f);
 const dl = page.waitForEvent('download', { timeout: 900000 });
 const info = await page.evaluate(async ({ SNAPS }) => {

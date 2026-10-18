@@ -17,7 +17,7 @@ await p.reload();
 await p.waitForFunction(() => window.__app && __app.G && __app.G.tiles.length);
 
 const def = await p.evaluate(() => ({ v: __app.S.settingsVersion, endCardHand: __app.S.endCardHand, handAvoid: __app.S.handAvoid, endCard: __app.S.endCard }));
-check('默认 v20、endCardHand=false、handAvoid=false、endCard=true', def.v === 20 && def.endCardHand === false && def.handAvoid === false && def.endCard === true, def);
+check('默认 v21、endCardHand=false、handAvoid=false、endCard=true', def.v === 21 && def.endCardHand === false && def.handAvoid === false && def.endCard === true, def);
 
 const sw = await p.evaluate(() => {
   const row = [...document.querySelectorAll('.row')].find(r => /结束页显示手指/.test(r.textContent || ''));
