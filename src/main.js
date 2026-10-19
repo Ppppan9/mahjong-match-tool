@@ -108,6 +108,7 @@ function migrate(j, fromStorage = false) {
   // v20：新增 3D 动画导出设置（export3dFps / export3dParticles / export3dHand）。只补默认值，旧键原样保留
   // v21：新增 hideCursor（手指出现时隐藏鼠标，默认开）。只补默认值
   // v22：新增 H5 试玩广告导出设置（h5Format/h5Orientation/h5CtaText…）。只补默认值
+  // v23：H5 试玩多尺寸自适应（contain/letterbox），无新设置键
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -2004,6 +2005,7 @@ window.__app = {
 const __h5 = applyPlayableMode({
   applySettings: (ps) => { Object.assign(S, ps); saveSettings(); },
   autoPlay: () => { try { autoSolve(); } catch (e) { } },
+  onResize: () => { try { layoutViewport(); } catch (e) { /* design buffer + CSS contain */ } },
 });
 if (__h5) { try { const panel = document.getElementById('panel'); if (panel) panel.style.display = 'none'; } catch (e) { } }
 buildPanel();

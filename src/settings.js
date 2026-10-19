@@ -238,6 +238,7 @@ export const DEFAULTS = {
   export3dParticles: true,
   export3dHand: true,
   // v22：导出 H5 试玩广告
+  // v23：H5 多尺寸自适应（壳层，无新键）
   h5Format: 'tiktok,google,mintegral,generic',
   h5Orientation: '1',
   h5CtaText: '立即下载',

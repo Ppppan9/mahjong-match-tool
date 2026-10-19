@@ -2,6 +2,16 @@
 
 本 ZIP 含一个或多个广告渠道子目录。每个子目录是**自包含** HTML5 试玩：打开 `index.html` 即可离线游玩（无编辑器面板），底部 CTA 跳转应用商店 / 落地页。
 
+## 多尺寸自适应（Responsive）
+
+试玩壳采用 **contain / letterbox** 策略：游戏舞台保持设计画幅比例（默认 9:16 / `canvasW×canvasH`），在设备视口内等比缩放并居中；上下或左右留出与背景色一致的黑边。支持手机（SE→Pro Max、Pixel、Galaxy）、平板（iPad Mini/Air/Pro、Surface）、折叠屏（Z Fold 外屏、Duo）及横屏平板，**不是**固定死 720×1280 CSS 盒子。
+
+- 视口：`width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`
+- 全屏：`100vw` / `100dvh` + `safe-area-inset-*`
+- CTA：底部 sticky，预留 `safe-area-inset-bottom`
+- `h5Orientation`：`1` 竖屏优先，`2` 横屏创意，`0` 双端（横屏设备上仍 contain 竖屏内容，可玩不裁切）
+- 运行时：`window.__h5FitStage()` / `window.__h5StageLayout`；`resize` / `orientationchange` / `visualViewport` 时重算
+
 ## 目录
 
 | 文件夹 | 渠道 | CTA |
@@ -19,4 +29,4 @@
 
 ## 本地预览
 
-用本地静态服务器打开对应渠道的 `index.html`（部分渠道 SDK 在 `file://` 下行为不同）。
+用本地静态服务器打开对应渠道的 `index.html`（部分渠道 SDK 在 `file://` 下行为不同）。用 Chrome DevTools Device Toolbar 切换 SE / 14 Pro Max / iPad / Z Fold 等验证 letterbox 与 CTA。

@@ -1,0 +1,339 @@
+{
+  "results": [
+    {
+      "name": "iPhone SE",
+      "width": 375,
+      "height": 667,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 339,
+          "h": 603,
+          "top": 32,
+          "left": 18,
+          "visible": true
+        },
+        "cta": {
+          "w": 375,
+          "h": 63.1875,
+          "top": 603.8125,
+          "bottom": 667,
+          "visible": true
+        },
+        "wrap": {
+          "w": 375,
+          "h": 667
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 339,
+          "cssH": 603,
+          "scale": 0.47109375,
+          "orientation": 1,
+          "availW": 375,
+          "availH": 603,
+          "ctaH": 64,
+          "vw": 375,
+          "vh": 667
+        },
+        "vw": 375,
+        "vh": 667,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "letterbox": "bottom-or-cta",
+      "checks": []
+    },
+    {
+      "name": "iPhone 12/13",
+      "width": 390,
+      "height": 844,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 390,
+          "h": 693,
+          "top": 75.5,
+          "left": 0,
+          "visible": true
+        },
+        "cta": {
+          "w": 390,
+          "h": 63.1875,
+          "top": 780.8125,
+          "bottom": 844,
+          "visible": true
+        },
+        "wrap": {
+          "w": 390,
+          "h": 844
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 390,
+          "cssH": 693,
+          "scale": 0.5416666666666666,
+          "orientation": 1,
+          "availW": 390,
+          "availH": 780,
+          "ctaH": 64,
+          "vw": 390,
+          "vh": 844
+        },
+        "vw": 390,
+        "vh": 844,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "letterbox": "bottom-or-cta",
+      "checks": []
+    },
+    {
+      "name": "iPhone 14 Pro Max",
+      "width": 428,
+      "height": 926,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 428,
+          "h": 760,
+          "top": 83,
+          "left": 0,
+          "visible": true
+        },
+        "cta": {
+          "w": 428,
+          "h": 63.1875,
+          "top": 862.8125,
+          "bottom": 926,
+          "visible": true
+        },
+        "wrap": {
+          "w": 428,
+          "h": 926
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 428,
+          "cssH": 760,
+          "scale": 0.5944444444444444,
+          "orientation": 1,
+          "availW": 428,
+          "availH": 862,
+          "ctaH": 64,
+          "vw": 428,
+          "vh": 926
+        },
+        "vw": 428,
+        "vh": 926,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "letterbox": "bottom-or-cta",
+      "checks": []
+    },
+    {
+      "name": "iPad Mini",
+      "width": 768,
+      "height": 1024,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 540,
+          "h": 960,
+          "top": 32,
+          "left": 114,
+          "visible": true
+        },
+        "cta": {
+          "w": 768,
+          "h": 63.1875,
+          "top": 960.8125,
+          "bottom": 1024,
+          "visible": true
+        },
+        "wrap": {
+          "w": 768,
+          "h": 1024
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 540,
+          "cssH": 960,
+          "scale": 0.75,
+          "orientation": 1,
+          "availW": 768,
+          "availH": 960,
+          "ctaH": 64,
+          "vw": 768,
+          "vh": 1024
+        },
+        "vw": 768,
+        "vh": 1024,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "checks": []
+    },
+    {
+      "name": "iPad Pro",
+      "width": 1024,
+      "height": 1366,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 732,
+          "h": 1302,
+          "top": 32,
+          "left": 146,
+          "visible": true
+        },
+        "cta": {
+          "w": 1024,
+          "h": 63.1875,
+          "top": 1302.8125,
+          "bottom": 1366,
+          "visible": true
+        },
+        "wrap": {
+          "w": 1024,
+          "h": 1366
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 732,
+          "cssH": 1302,
+          "scale": 1.0171875,
+          "orientation": 1,
+          "availW": 1024,
+          "availH": 1302,
+          "ctaH": 64,
+          "vw": 1024,
+          "vh": 1366
+        },
+        "vw": 1024,
+        "vh": 1366,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "checks": []
+    },
+    {
+      "name": "Galaxy Z Fold cover",
+      "width": 280,
+      "height": 653,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 280,
+          "h": 497,
+          "top": 78,
+          "left": 0,
+          "visible": true
+        },
+        "cta": {
+          "w": 280,
+          "h": 63.1875,
+          "top": 589.8125,
+          "bottom": 653,
+          "visible": true
+        },
+        "wrap": {
+          "w": 280,
+          "h": 653
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 280,
+          "cssH": 497,
+          "scale": 0.3888888888888889,
+          "orientation": 1,
+          "availW": 280,
+          "availH": 589,
+          "ctaH": 64,
+          "vw": 280,
+          "vh": 653
+        },
+        "vw": 280,
+        "vh": 653,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "letterbox": "bottom-or-cta",
+      "checks": []
+    },
+    {
+      "name": "Nest Hub / landscape tablet",
+      "width": 1024,
+      "height": 600,
+      "pass": true,
+      "metrics": {
+        "stage": {
+          "w": 301,
+          "h": 536,
+          "top": 32,
+          "left": 361.5,
+          "visible": true
+        },
+        "cta": {
+          "w": 1024,
+          "h": 63.1875,
+          "top": 536.8125,
+          "bottom": 600,
+          "visible": true
+        },
+        "wrap": {
+          "w": 1024,
+          "h": 600
+        },
+        "layout": {
+          "designW": 720,
+          "designH": 1280,
+          "cssW": 301,
+          "cssH": 536,
+          "scale": 0.41875,
+          "orientation": 1,
+          "availW": 1024,
+          "availH": 536,
+          "ctaH": 64,
+          "vw": 1024,
+          "vh": 600
+        },
+        "vw": 1024,
+        "vh": 600,
+        "overflowX": false,
+        "overflowY": false,
+        "bodyBg": "rgb(0, 0, 0)",
+        "hasFit": true,
+        "playableCss": true
+      },
+      "letterbox": "side",
+      "checks": []
+    }
+  ],
+  "ok": true
+}

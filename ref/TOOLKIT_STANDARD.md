@@ -6,7 +6,7 @@
 
 > **手指与鼠标（2026-10-19 用户反馈「手指和鼠标同时出现了」）**：只要手指图显示在游戏画面上（自动通关时手指可见、手动游玩手指跟随指针、拖动中——包括指针捕获期间），游戏画布 `cursor:none`，只看到手指；设置面板/按钮上保持正常鼠标；没有手指（未上传/关闭显示手指/手动跟随关闭/结束页隐藏手指）时画布保持 `cursor:pointer`。手动跟随时指尖锚点（handAnchorX/Y）严格落在指针位置（0 偏移，pointermove 当帧更新），鼠标隐藏时手指立即显示（不淡入）。由 `hideCursor`（默认 true）控制，每帧按状态更新。系统鼠标本来就不会被录制/AE/3D 采集，手指图层导出不变。测试：`npm run test:cursor`（test/cursor-test.mjs，三个工具同一份）。
 
-> **H5 试玩广告（2026-10-19）**：每个核玩工具默认内置「导出 H5 试玩广告」面板（在「导出 3D」之后、「结束页」之前）。一键导出自包含试玩 ZIP（含用户勾选的全部渠道子目录），试玩包**不得**带完整编辑器 UI，仅游戏画面 + CTA；详见 §5。
+> **H5 试玩广告（2026-10-19）**：每个核玩工具默认内置「导出 H5 试玩广告」面板（在「导出 3D」之后、「结束页」之前）。一键导出自包含试玩 ZIP（含用户勾选的全部渠道子目录），试玩包**不得**带完整编辑器 UI，仅游戏画面 + CTA；须多尺寸自适应（contain/letterbox），详见 §5。
 
 以麻将消除工具（/workspace/mahjong-tool，v20）为基准整理；打螺丝工具 v1.3.1 起遵守。以后的新工具请按本文件实现**通用部分**，工具专有参数放在对应分组末尾或单独分组。
 
@@ -106,7 +106,8 @@ audio/mix.wav  audio/sfx_*.wav
   generic/README.txt
 ```
 - 仅包含用户在 `h5Format` 中勾选的渠道；默认四个全开。
-- 每个渠道的 `index.html` 为**自包含**单文件试玩：内嵌当前设置（`window.__PLAYABLE__`），**不显示**设置面板 / 顶部工具栏，仅游戏画布（固定或自适应 720×1280 竖屏）+ CTA 条 + 可选教程手指。
+- 每个渠道的 `index.html` 为**自包含**单文件试玩：内嵌当前设置（`window.__PLAYABLE__`），**不显示**设置面板 / 顶部工具栏，仅游戏画布 + CTA 条 + 可选教程手指。
+- **多尺寸自适应（responsive playable）**：不得只按固定 720×1280 CSS 盒子导出。舞台在手机（SE→14 Pro Max、Pixel、Galaxy…）、平板（iPad Mini/Air/Pro、Surface）、折叠屏（Z Fold 外屏、Duo）等视口上须可玩。缩放策略默认 **contain / letterbox**：保持设计画幅比例（`canvasW×canvasH` 或 9:16），居中等比缩放，letterbox 条与背景色一致；全视口 `100vw`/`100dvh` + `safe-area-inset-*`；CTA 底部 sticky 并预留 safe-area。
 - 目标：单渠道与总 ZIP 尽量 < `h5MaxMb`（默认 5MB）。超限时 UI 警告；可尝试 minify、去掉 AE 录制器逻辑（playable 构建不跑 AE）、压缩贴图。three.js 体量大时文档说明已知限制。
 
 ### 5.2 渠道 CTA
@@ -121,6 +122,10 @@ audio/mix.wav  audio/sfx_*.wav
 - 注入 `window.__PLAYABLE__ = { toolId, format, settings, ctaText, storeUrl, gameName, icon, orientation, autoPlay }`。
 - 主程序检测 `__PLAYABLE__`：应用 settings、隐藏 `#panel`、舞台全屏、挂 CTA、可选自动通关。
 - **禁止**在试玩包中暴露完整编辑器（导入/导出设置、AE/3D 按钮、参数面板）。
+- meta viewport：`width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`。
+- `h5Orientation` / `config.json` `playable_orientation`：`1` 竖屏，`2` 横屏，`0` 双端。双端时横屏设备仍用 contain 放下竖屏内容（可玩、不裁切），勿写死仅竖屏视口。
+- `resize` / `orientationchange` / `visualViewport`：调用 `window.__h5FitStage()` 重算舞台 CSS；`window.__h5StageLayout` 暴露 `{designW,designH,cssW,cssH,scale,…}`。2D 画布靠 CSS 缩放（点击已用 `getBoundingClientRect`）；three.js 工具可在 `applyPlayableMode({ onResize })` 里 `setSize` + 更新 camera aspect。
+- 测试：`npm run test:h5` 须覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、428×926、768×1024、1024×1366、280×653、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
 
 ### 5.4 共享 API
 ```js
@@ -130,4 +135,4 @@ parseFormats(h5Format)  // → ['tiktok',…]
 ```
 
 ## 6. 测试
-`npm run test:logic`、`npm test`（自动通关+截图）、`npm run test:ae`（导出 + jsx mock + 合成 PSNR）、`npm run test:3d`（Blender 导入 + 渲染对比）、`npm run test:h5`（ZIP 含 index.html + tiktok/config.json；可选 headless 打开）。
+`npm run test:logic`、`npm test`（自动通关+截图）、`npm run test:ae`（导出 + jsx mock + 合成 PSNR）、`npm run test:3d`（Blender 导入 + 渲染对比）、`npm run test:h5`（ZIP 含 index.html + tiktok/config.json；Playwright 多视口冒烟：stage 可见、CTA 不裁切、contain 缩放）。
