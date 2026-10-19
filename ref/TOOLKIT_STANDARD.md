@@ -53,6 +53,9 @@
 | 导出 H5 试玩广告 | _exportH5 | 按钮 `⬇ 导出 H5 试玩 ZIP` | button | | |
 | | h5Format | 渠道（多选 CSV 或 select） | `tiktok`\|`google`\|`mintegral`\|`generic`；默认 `tiktok,google,mintegral,generic`（全部）或至少 tiktok+generic | all | all |
 | | h5Orientation | 试玩方向 | 0 双端 / 1 竖屏 / 2 横屏 | 1 | 1 |
+| | h5Device | 预览机型 | select：adaptive / iphone-se / … / custom | adaptive | adaptive |
+| | h5DeviceW | 预览宽度(px) | 240~1440 | 390 | 390 |
+| | h5DeviceH | 预览高度(px) | 400~2560 | 844 | 844 |
 | | h5CtaText | CTA 按钮文案 | text | 立即下载 | 立即下载 |
 | | h5StoreUrl | 应用商店 / 落地页 URL | text | placeholder | placeholder |
 | | h5GameName | 游戏名（可选，显示在 CTA 旁） | text | 工具中文名 | 工具中文名 |
@@ -124,6 +127,7 @@ audio/mix.wav  audio/sfx_*.wav
 - **禁止**在试玩包中暴露完整编辑器（导入/导出设置、AE/3D 按钮、参数面板）。
 - meta viewport：`width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`。
 - `h5Orientation` / `config.json` `playable_orientation`：`1` 竖屏，`2` 横屏，`0` 双端。双端时横屏设备仍用 contain 放下竖屏内容（可玩、不裁切），勿写死仅竖屏视口。
+- `h5Device` / `h5DeviceW` / `h5DeviceH`：**预览与导出共用**。`adaptive` → 设计画幅 = `canvasW×canvasH`，全机型 contain/letterbox；指定机型或 `custom` → 设计画幅锁定为 W×H，导出烘焙 `canvasW/H`（及麻将 `recRes`）、`designW/H`、`ad.size`、README「本包目标尺寸」。编辑器非 adaptive 时显示设备预览框。
 - `resize` / `orientationchange` / `visualViewport`：调用 `window.__h5FitStage()` 重算舞台 CSS；`window.__h5StageLayout` 暴露 `{designW,designH,cssW,cssH,scale,…}`。2D 画布靠 CSS 缩放（点击已用 `getBoundingClientRect`）；three.js 工具可在 `applyPlayableMode({ onResize })` 里 `setSize` + 更新 camera aspect。
 - 测试：`npm run test:h5` 须覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、428×926、768×1024、1024×1366、280×653、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
 
@@ -132,6 +136,8 @@ audio/mix.wav  audio/sfx_*.wav
 buildPlayableZip({ toolId, formats, baseHtml, opts })
 makePlayableHtml(baseHtml, { format, ...opts })
 parseFormats(h5Format)  // → ['tiktok',…]
+H5_DEVICE_PRESETS / resolveH5Device(S) / bakeH5DeviceIntoSettings(S)
+applyEditorDevicePreview(S) / bindEditorDevicePreview(getS)
 ```
 
 ## 6. 测试

@@ -6,11 +6,11 @@ import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
 import { export3D } from './export3d/export3d.js';
-import { exportH5PlayableFromPage, applyPlayableMode, fetchBaseHtml, buildPlayableZip } from './h5/index.js';
+import { exportH5PlayableFromPage, applyPlayableMode, fetchBaseHtml, buildPlayableZip, applyH5DevicePresetToSettings, markH5DeviceCustomIfSizeEdited, bindEditorDevicePreview } from './h5/index.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 22;
+const SETTINGS_VERSION = 24;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -109,6 +109,7 @@ function migrate(j, fromStorage = false) {
   // v21：新增 hideCursor（手指出现时隐藏鼠标，默认开）。只补默认值
   // v22：新增 H5 试玩广告导出设置（h5Format/h5Orientation/h5CtaText…）。只补默认值
   // v23：H5 试玩多尺寸自适应（contain/letterbox），无新设置键
+  // v24：H5 预览机型/尺寸（预览+导出共用 h5Device/W/H）
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -1723,6 +1724,16 @@ function refreshTheme() {
 }
 function onSetting(item, v) {
   if (item.k === 'theme') { setTheme(v); return; }
+  if (item.k === 'h5Device') {
+    S.h5Device = v; applyH5DevicePresetToSettings(S); saveSettings(); syncPanel();
+    try { if (window.__h5EditorDeviceFit) window.__h5EditorDeviceFit(); } catch (e) { }
+    return;
+  }
+  if (item.k === 'h5DeviceW' || item.k === 'h5DeviceH') {
+    S[item.k] = v; markH5DeviceCustomIfSizeEdited(S); saveSettings(); syncPanel();
+    try { if (window.__h5EditorDeviceFit) window.__h5EditorDeviceFit(); } catch (e) { }
+    return;
+  }
   if (/^press/.test(item.k) && G) { S[item.k] = v; saveSettings(); for (const t of G.tiles) { if (t.state === 'selected') { t.pressTok = (t.pressTok || 0) + 1; t.press = S.pressEnabled ? 1 : 0; } applyPress(t); } applyDark(); return; }
   S[item.k] = v; saveSettings();
   if (item.type === 'file') loadImg(item.k);
@@ -1792,6 +1803,7 @@ function buildPanel() {
         det.appendChild(pr);
       }
     }
+    if (grp.group.startsWith('导出 H5')) det.insertAdjacentHTML('beforeend', '<div class="tip">预览与导出均按所选机型/自定义尺寸；选「自适应」才是全机型 contain/letterbox。指定机型时设计画幅锁定为该分辨率。</div>');
     panelBody.appendChild(det);
   }
   syncPanel();
@@ -2008,6 +2020,7 @@ const __h5 = applyPlayableMode({
   onResize: () => { try { layoutViewport(); } catch (e) { /* design buffer + CSS contain */ } },
 });
 if (__h5) { try { const panel = document.getElementById('panel'); if (panel) panel.style.display = 'none'; } catch (e) { } }
+if (!__h5) bindEditorDevicePreview(() => S);
 buildPanel();
 drawHandPreview();
 showMigrationBanner();

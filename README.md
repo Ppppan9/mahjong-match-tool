@@ -1,5 +1,7 @@
 # 麻将消除 · 广告玩法复刻工具
 
+## v24：H5 预览机型/尺寸（预览+导出；adaptive=全机型）
+
 在线体验：https://ppppan9.github.io/mahjong-match-tool/
 
 **v22**：新增「导出 H5 试玩广告」面板（TikTok / Google Ads / Mintegral / Generic 渠道 ZIP；试玩包无编辑器，仅游戏画面 + CTA）。`npm run test:h5`。

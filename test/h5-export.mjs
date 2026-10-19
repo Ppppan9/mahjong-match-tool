@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { buildPlayableZip, parseFormats, makePlayableHtml } from '../src/h5/index.js';
+import { buildPlayableZip, parseFormats, makePlayableHtml, resolveH5Device, bakeH5DeviceIntoSettings, applyH5DevicePresetToSettings, H5_DEVICE_PRESETS } from '../src/h5/index.js';
 import { runResponsiveSmoke, formatSmokeReport } from '../src/h5/responsive-smoke.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +51,25 @@ const mb = buf.length / 1048576;
 if (mb >= 5) throw new Error('sample zip too large: ' + mb.toFixed(2) + 'MB');
 console.log('OK', path.basename(out), mb.toFixed(2) + 'MB', 'formats=' + r.formats.join('+'), r.warn || '');
 for (const [k, v] of Object.entries(r.sizes)) console.log(' ', k, 'html', (v / 1048576).toFixed(2) + 'MB');
+
+
+
+
+// Device preset bake: non-adaptive locks designW/H + canvas
+{
+  const S = { h5Device: 'iphone-se', h5DeviceW: 390, h5DeviceH: 844, canvasW: 720, canvasH: 1280 };
+  applyH5DevicePresetToSettings(S);
+  if (S.h5DeviceW !== 375 || S.h5DeviceH !== 667) throw new Error('preset should set 375x667');
+  const baked = bakeH5DeviceIntoSettings(S);
+  if (baked.settings.canvasW !== 375 || baked.settings.canvasH !== 667) throw new Error('bake should lock canvas');
+  const htmlDev = makePlayableHtml(baseHtml, { format: 'google', toolId: 't', settings: S, orientation: 1, storeUrl: 'https://example.com', ctaText: 'x' });
+  if (!htmlDev.includes('"designW":375') || !htmlDev.includes('width=375,height=667')) throw new Error('export html missing device design size');
+  const adapt = bakeH5DeviceIntoSettings({ h5Device: 'adaptive', canvasW: 720, canvasH: 1280 });
+  if (adapt.settings.canvasW !== 720) throw new Error('adaptive must keep canvas');
+  if (!H5_DEVICE_PRESETS.some(p => p.id === 'ipad-pro')) throw new Error('missing presets');
+  if (!baseHtml.includes('h5Device') || !(baseHtml.includes('预览机型') || baseHtml.includes('\\u9884\\u89C8\\u673A\\u578B'))) throw new Error('built index missing h5Device panel keys — rebuild');
+  console.log('Device preset bake OK', resolveH5Device(S).label);
+}
 
 // Responsive viewport smoke (generic channel HTML)
 const playableHtml = makePlayableHtml(baseHtml, {

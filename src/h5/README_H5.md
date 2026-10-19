@@ -2,14 +2,17 @@
 
 本 ZIP 含一个或多个广告渠道子目录。每个子目录是**自包含** HTML5 试玩：打开 `index.html` 即可离线游玩（无编辑器面板），底部 CTA 跳转应用商店 / 落地页。
 
-## 多尺寸自适应（Responsive）
+## 机型 / 尺寸与自适应
 
-试玩壳采用 **contain / letterbox** 策略：游戏舞台保持设计画幅比例（默认 9:16 / `canvasW×canvasH`），在设备视口内等比缩放并居中；上下或左右留出与背景色一致的黑边。支持手机（SE→Pro Max、Pixel、Galaxy）、平板（iPad Mini/Air/Pro、Surface）、折叠屏（Z Fold 外屏、Duo）及横屏平板，**不是**固定死 720×1280 CSS 盒子。
+面板「预览机型」同时作用于**编辑器预览**与**导出 ZIP**：
+
+- **自适应（`h5Device=adaptive`，导出推荐）**：设计画幅沿用 `canvasW×canvasH`（或缺省 720×1280）；壳层 **contain / letterbox**，全机型可玩。
+- **指定机型或自定义宽高**：设计画幅 / 舞台逻辑尺寸锁定为 `h5DeviceW×h5DeviceH`（如 iPhone SE 375×667）；导出 HTML 的 `designW/H`、`ad.size`、烘焙设置中的 `canvasW/H`（及麻将 `recRes`）均按该分辨率定稿。壳层仍可用 contain 适配略有差异的视口。
 
 - 视口：`width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover`
 - 全屏：`100vw` / `100dvh` + `safe-area-inset-*`
 - CTA：底部 sticky，预留 `safe-area-inset-bottom`
-- `h5Orientation`：`1` 竖屏优先，`2` 横屏创意，`0` 双端（横屏设备上仍 contain 竖屏内容，可玩不裁切）
+- `h5Orientation`：`1` 竖屏优先，`2` 横屏创意，`0` 双端
 - 运行时：`window.__h5FitStage()` / `window.__h5StageLayout`；`resize` / `orientationchange` / `visualViewport` 时重算
 
 ## 目录
@@ -29,4 +32,4 @@
 
 ## 本地预览
 
-用本地静态服务器打开对应渠道的 `index.html`（部分渠道 SDK 在 `file://` 下行为不同）。用 Chrome DevTools Device Toolbar 切换 SE / 14 Pro Max / iPad / Z Fold 等验证 letterbox 与 CTA。
+用本地静态服务器打开对应渠道的 `index.html`（部分渠道 SDK 在 `file://` 下行为不同）。用 Chrome DevTools Device Toolbar 切换 SE / 14 Pro Max / iPad / Z Fold 等验证 letterbox 与 CTA；若导出时选了指定机型，优先用该分辨率核对。
