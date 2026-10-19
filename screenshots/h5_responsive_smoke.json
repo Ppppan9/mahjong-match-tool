@@ -98,43 +98,43 @@
     },
     {
       "name": "iPhone 14 Pro Max",
-      "width": 428,
-      "height": 926,
+      "width": 430,
+      "height": 932,
       "pass": true,
       "metrics": {
         "stage": {
-          "w": 428,
-          "h": 760,
-          "top": 83,
+          "w": 430,
+          "h": 764,
+          "top": 84,
           "left": 0,
           "visible": true
         },
         "cta": {
-          "w": 428,
+          "w": 430,
           "h": 63.1875,
-          "top": 862.8125,
-          "bottom": 926,
+          "top": 868.8125,
+          "bottom": 932,
           "visible": true
         },
         "wrap": {
-          "w": 428,
-          "h": 926
+          "w": 430,
+          "h": 932
         },
         "layout": {
           "designW": 720,
           "designH": 1280,
-          "cssW": 428,
-          "cssH": 760,
-          "scale": 0.5944444444444444,
+          "cssW": 430,
+          "cssH": 764,
+          "scale": 0.5972222222222222,
           "orientation": 1,
-          "availW": 428,
-          "availH": 862,
+          "availW": 430,
+          "availH": 868,
           "ctaH": 64,
-          "vw": 428,
-          "vh": 926
+          "vw": 430,
+          "vh": 932
         },
-        "vw": 428,
-        "vh": 926,
+        "vw": 430,
+        "vh": 932,
         "overflowX": false,
         "overflowY": false,
         "bodyBg": "rgb(0, 0, 0)",
@@ -192,44 +192,44 @@
       "checks": []
     },
     {
-      "name": "iPad Pro",
-      "width": 1024,
-      "height": 1366,
+      "name": "iPad Pro 13",
+      "width": 1032,
+      "height": 1376,
       "pass": true,
       "metrics": {
         "stage": {
-          "w": 732,
-          "h": 1302,
+          "w": 737,
+          "h": 1312,
           "top": 32,
-          "left": 146,
+          "left": 147.5,
           "visible": true
         },
         "cta": {
-          "w": 1024,
+          "w": 1032,
           "h": 63.1875,
-          "top": 1302.8125,
-          "bottom": 1366,
+          "top": 1312.8125,
+          "bottom": 1376,
           "visible": true
         },
         "wrap": {
-          "w": 1024,
-          "h": 1366
+          "w": 1032,
+          "h": 1376
         },
         "layout": {
           "designW": 720,
           "designH": 1280,
-          "cssW": 732,
-          "cssH": 1302,
-          "scale": 1.0171875,
+          "cssW": 737,
+          "cssH": 1312,
+          "scale": 1.025,
           "orientation": 1,
-          "availW": 1024,
-          "availH": 1302,
+          "availW": 1032,
+          "availH": 1312,
           "ctaH": 64,
-          "vw": 1024,
-          "vh": 1366
+          "vw": 1032,
+          "vh": 1376
         },
-        "vw": 1024,
-        "vh": 1366,
+        "vw": 1032,
+        "vh": 1376,
         "overflowX": false,
         "overflowY": false,
         "bodyBg": "rgb(0, 0, 0)",
@@ -239,44 +239,44 @@
       "checks": []
     },
     {
-      "name": "Galaxy Z Fold cover",
-      "width": 280,
-      "height": 653,
+      "name": "Galaxy Z Fold 5 cover",
+      "width": 344,
+      "height": 882,
       "pass": true,
       "metrics": {
         "stage": {
-          "w": 280,
-          "h": 497,
-          "top": 78,
+          "w": 344,
+          "h": 611,
+          "top": 135.5,
           "left": 0,
           "visible": true
         },
         "cta": {
-          "w": 280,
+          "w": 344,
           "h": 63.1875,
-          "top": 589.8125,
-          "bottom": 653,
+          "top": 818.8125,
+          "bottom": 882,
           "visible": true
         },
         "wrap": {
-          "w": 280,
-          "h": 653
+          "w": 344,
+          "h": 882
         },
         "layout": {
           "designW": 720,
           "designH": 1280,
-          "cssW": 280,
-          "cssH": 497,
-          "scale": 0.3888888888888889,
+          "cssW": 344,
+          "cssH": 611,
+          "scale": 0.4777777777777778,
           "orientation": 1,
-          "availW": 280,
-          "availH": 589,
+          "availW": 344,
+          "availH": 818,
           "ctaH": 64,
-          "vw": 280,
-          "vh": 653
+          "vw": 344,
+          "vh": 882
         },
-        "vw": 280,
-        "vh": 653,
+        "vw": 344,
+        "vh": 882,
         "overflowX": false,
         "overflowY": false,
         "bodyBg": "rgb(0, 0, 0)",

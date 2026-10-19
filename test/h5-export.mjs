@@ -67,6 +67,13 @@ for (const [k, v] of Object.entries(r.sizes)) console.log(' ', k, 'html', (v / 1
   const adapt = bakeH5DeviceIntoSettings({ h5Device: 'adaptive', canvasW: 720, canvasH: 1280 });
   if (adapt.settings.canvasW !== 720) throw new Error('adaptive must keep canvas');
   if (!H5_DEVICE_PRESETS.some(p => p.id === 'ipad-pro')) throw new Error('missing presets');
+  const proMax = H5_DEVICE_PRESETS.find(p => p.id === 'iphone-14-pro-max');
+  if (!proMax || proMax.width !== 430 || proMax.height !== 932) throw new Error('iphone-14-pro-max must be 430x932');
+  const fold = H5_DEVICE_PRESETS.find(p => p.id === 'fold-cover');
+  if (!fold || fold.width !== 344 || fold.height !== 882) throw new Error('fold-cover must be 344x882');
+  const ipad = H5_DEVICE_PRESETS.find(p => p.id === 'ipad-pro');
+  if (!ipad || ipad.width !== 1032 || ipad.height !== 1376) throw new Error('ipad-pro must be 1032x1376');
+  if (!H5_DEVICE_PRESETS.some(p => p.id === 'iphone-14-plus' && p.width === 428 && p.height === 926)) throw new Error('missing iphone-14-plus 428x926');
   if (!baseHtml.includes('h5Device') || !(baseHtml.includes('预览机型') || baseHtml.includes('\\u9884\\u89C8\\u673A\\u578B'))) throw new Error('built index missing h5Device panel keys — rebuild');
   console.log('Device preset bake OK', resolveH5Device(S).label);
 }

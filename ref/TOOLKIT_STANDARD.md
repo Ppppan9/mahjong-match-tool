@@ -129,7 +129,7 @@ audio/mix.wav  audio/sfx_*.wav
 - `h5Orientation` / `config.json` `playable_orientation`：`1` 竖屏，`2` 横屏，`0` 双端。双端时横屏设备仍用 contain 放下竖屏内容（可玩、不裁切），勿写死仅竖屏视口。
 - `h5Device` / `h5DeviceW` / `h5DeviceH`：**预览与导出共用**。`adaptive` → 设计画幅 = `canvasW×canvasH`，全机型 contain/letterbox；指定机型或 `custom` → 设计画幅锁定为 W×H，导出烘焙 `canvasW/H`（及麻将 `recRes`）、`designW/H`、`ad.size`、README「本包目标尺寸」。编辑器非 adaptive 时显示设备预览框。
 - `resize` / `orientationchange` / `visualViewport`：调用 `window.__h5FitStage()` 重算舞台 CSS；`window.__h5StageLayout` 暴露 `{designW,designH,cssW,cssH,scale,…}`。2D 画布靠 CSS 缩放（点击已用 `getBoundingClientRect`）；three.js 工具可在 `applyPlayableMode({ onResize })` 里 `setSize` + 更新 camera aspect。
-- 测试：`npm run test:h5` 须覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、428×926、768×1024、1024×1366、280×653、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
+- 测试：`npm run test:h5` 须覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、430×932、768×1024、1032×1376、344×882、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
 
 ### 5.4 共享 API
 ```js

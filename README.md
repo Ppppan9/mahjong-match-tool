@@ -1,5 +1,8 @@
 # 麻将消除 · 广告玩法复刻工具
 
+## v25：H5 机型分辨率对齐 Chrome DevTools
+- 修正：iPhone 14 Pro Max → **430×932**；Galaxy Z Fold 5 外屏 → **344×882**；iPad Pro 13 → **1032×1376**。新增 `iphone-14-plus` 428×926。设置版本 25。`npm run test:h5`。
+
 ## v24：H5 预览机型/尺寸（预览+导出；adaptive=全机型）
 
 在线体验：https://ppppan9.github.io/mahjong-match-tool/
