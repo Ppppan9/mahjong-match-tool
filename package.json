@@ -15,7 +15,8 @@
     "test:norec": "node test/no-auto-rec.mjs",
     "test:particles": "node test/particles.mjs",
     "shot:burst": "node test/burst-seq.mjs",
-    "test:cursor": "node test/cursor-test.mjs"
+    "test:cursor": "node test/cursor-test.mjs",
+    "test:h5": "node test/h5-export.mjs"
   },
   "devDependencies": {
     "acorn": "^8.19.0",

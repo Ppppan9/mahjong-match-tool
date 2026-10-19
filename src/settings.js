@@ -214,7 +214,7 @@ export const DEFAULTS = {
   handAvoidWait: 'burst',
   handAvoidHold: 120,
   clearAnimLayer: 'aboveHand',
-  settingsVersion: 21,
+  settingsVersion: 22,
   // 录制
   recRes: '720x1280',
   recFps: 30,
@@ -237,6 +237,15 @@ export const DEFAULTS = {
   export3dFps: 30,
   export3dParticles: true,
   export3dHand: true,
+  // v22：导出 H5 试玩广告
+  h5Format: 'tiktok,google,mintegral,generic',
+  h5Orientation: '1',
+  h5CtaText: '立即下载',
+  h5StoreUrl: 'https://play.google.com/store/apps/details?id=com.example.game',
+  h5GameName: '麻将消除',
+  h5Icon: '',
+  h5MaxMb: 5,
+  h5AutoPlay: true,
   // 结束页
   endCard: true,
   endCardHand: false, // v19：结尾页默认不显示手指（含自动通关点按钮动画）；可在面板打开
@@ -520,6 +529,17 @@ export const SCHEMA = [
     S('export3dFps', '3D 动画帧率', [[24, '24'], [25, '25'], [30, '30'], [60, '60']], { num: true }),
     B('export3dParticles', '包含树叶/花瓣粒子（烘焙成带贴图的小平面）'),
     B('export3dHand', '包含手指（贴图平面；结束页是否显示仍按“结束页显示手指”）'),
+  ]},
+  { group: '导出 H5 试玩广告', open: true, items: [
+    { k: '_exportH5', label: '导出当前设置为自包含 H5 试玩（无编辑器面板，仅游戏+CTA）', type: 'button', action: 'exportH5', text: '⬇ 导出 H5 试玩 ZIP' },
+    S('h5Format', '渠道格式', [['tiktok,google,mintegral,generic', '全部（TikTok+Google+Mintegral+Generic）'], ['tiktok,generic', 'TikTok + Generic'], ['tiktok', '仅 TikTok/Pangle'], ['google', '仅 Google Ads'], ['mintegral', '仅 Mintegral'], ['generic', '仅 Generic 离线']]),
+    S('h5Orientation', '试玩方向', [['0', '双端 (0)'], ['1', '竖屏 (1)'], ['2', '横屏 (2)']]),
+    T('h5CtaText', 'CTA 按钮文案'),
+    T('h5StoreUrl', '应用商店 / 落地页 URL'),
+    T('h5GameName', '游戏名（可选）'),
+    F('h5Icon', '应用图标（可选，透明PNG）'),
+    R('h5MaxMb', '体积告警阈值(MB)', 1, 20, 0.5),
+    B('h5AutoPlay', '打开试玩后自动通关演示'),
   ]},
   { group: '结束页(End Card)', items: [
     B('endCard', '显示结束页'),

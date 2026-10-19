@@ -1,0 +1,22 @@
+# H5 试玩广告包（核玩工具导出）
+
+本 ZIP 含一个或多个广告渠道子目录。每个子目录是**自包含** HTML5 试玩：打开 `index.html` 即可离线游玩（无编辑器面板），底部 CTA 跳转应用商店 / 落地页。
+
+## 目录
+
+| 文件夹 | 渠道 | CTA |
+|--------|------|-----|
+| `tiktok/` | TikTok / Pangle 试玩 | `window.openAppStore()`，否则打开商店 URL；含 `config.json`（`playable_orientation`） |
+| `google/` | Google Ads Playable | `ExitApi.exit()`（含 stub）；相对路径；竖屏 meta |
+| `mintegral/` | Mintegral | `window.install()` → `window.gameEnd()` → 商店 URL |
+| `generic/` | 通用离线包 | 点击打开商店 URL；附 `README.txt` |
+
+## 限制
+
+- 目标体积 ≤ 5MB（超限请压缩贴图 / 关闭多余资源）。Google：≤512 文件。
+- 试玩包**不含**设置面板、AE/3D 导出等编辑器功能；设置已烘焙进页面。
+- three.js 工具体积较大时可能接近上限，属已知限制。
+
+## 本地预览
+
+用本地静态服务器打开对应渠道的 `index.html`（部分渠道 SDK 在 `file://` 下行为不同）。

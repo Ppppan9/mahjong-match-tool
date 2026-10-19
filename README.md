@@ -2,6 +2,8 @@
 
 在线体验：https://ppppan9.github.io/mahjong-match-tool/
 
+**v22**：新增「导出 H5 试玩广告」面板（TikTok / Google Ads / Mintegral / Generic 渠道 ZIP；试玩包无编辑器，仅游戏画面 + CTA）。`npm run test:h5`。
+
 一个纯前端、**离线可用**的麻将消除（“Online Domino Cafe”广告同款玩法）网页工具：3D 麻将堆叠棋盘、配对消除、RELAX 目标字母收集、手指自动通关、自动录屏，以及覆盖全部游戏参数的控制面板。
 
 ## 打开方式

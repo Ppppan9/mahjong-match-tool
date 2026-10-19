@@ -6,10 +6,11 @@ import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
 import { export3D } from './export3d/export3d.js';
+import { exportH5PlayableFromPage, applyPlayableMode, fetchBaseHtml, buildPlayableZip } from './h5/index.js';
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 21;
+const SETTINGS_VERSION = 22;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -106,6 +107,7 @@ function migrate(j, fromStorage = false) {
   // v19：新增 endCardHand（默认 false）。新键取 DEFAULTS；自定义/导入值原样保留，无需改写旧键
   // v20：新增 3D 动画导出设置（export3dFps / export3dParticles / export3dHand）。只补默认值，旧键原样保留
   // v21：新增 hideCursor（手指出现时隐藏鼠标，默认开）。只补默认值
+  // v22：新增 H5 试玩广告导出设置（h5Format/h5Orientation/h5CtaText…）。只补默认值
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {
@@ -1969,8 +1971,15 @@ async function export3DZip(rec = aeLastRec) {
     return window.__last3DExport;
   } catch (e) { console.error(e); toast('3D 导出失败：' + e.message); return null; }
 }
+async function exportH5Zip() {
+  try {
+    const r = await exportH5PlayableFromPage({ toolId: 'mahjong-match-tool', S, status: (m) => toast(m), toast });
+    return r;
+  } catch (e) { console.error(e); toast('H5 导出失败：' + e.message); return null; }
+}
 const BUTTON_ACTIONS = {
   export3d: () => export3DZip(),
+  exportH5: () => exportH5Zip(),
   aeToggle: () => AE.active() ? aeStopAndExport() : aeStart(),
   aeExport: () => aeExport(),
   resetTheme: () => resetTheme(),
@@ -1985,13 +1994,18 @@ function updateAEButtons() {
 window.__app = {
   setTheme, resetTheme, THEMES, get theme() { return S.theme; }, faceCanvas, drawTile2DTo(c2d, ...a) { const old = ctx; ctx = c2d; try { drawTile2D(...a); } finally { ctx = old; } },
   drawPart(c2d, fn, ...args) { const old = ctx; ctx = c2d; try { ({ drawEndCard, drawTopBar, drawBackground })[fn](...args); } finally { ctx = old; } },
-  AE, aeStart, aeStopAndExport, aeExport, export3DZip, get aeLastRec() { return aeLastRec; },
+  AE, aeStart, aeStopAndExport, aeExport, export3DZip, exportH5Zip, get aeLastRec() { return aeLastRec; },
   get S() { return S; }, get G() { return G; }, get HAND() { return HAND; }, zoneIntrude, avoidRadius, get AUTO() { return AUTO; }, get REC() { return REC; },
   setSetting(k, v) { const it = SCHEMA.flatMap(g => g.items).find(i => i.k === k); if (it) { onSetting(it, v); syncPanel(); } else S[k] = v; },
   newGame, autoSolve, startRecording, stopRecording, clickTile, tileScreen, tileScreenPressed, spawnParticles, particleState, isFree, importJSON, get VP() { return VP; }, audioState, sfx, resumeAudio,
   endCardState, endCardHidesHand, handState, endButtonRect,
 };
 
+const __h5 = applyPlayableMode({
+  applySettings: (ps) => { Object.assign(S, ps); saveSettings(); },
+  autoPlay: () => { try { autoSolve(); } catch (e) { } },
+});
+if (__h5) { try { const panel = document.getElementById('panel'); if (panel) panel.style.display = 'none'; } catch (e) { } }
 buildPanel();
 drawHandPreview();
 showMigrationBanner();
