@@ -1,5 +1,10 @@
 # 麻将消除 · 广告玩法复刻工具
 
+## v26：修复 H5 试玩黑屏 + 新增 AppLovin / Facebook / Moloco / Unity 渠道
+- **修复**：导出的 H5 试玩打开后舞台全黑，只有底部 CTA。原因：导出器用全文正则剥离/注入（`<script>window.__PLAYABLE__…</script>`、`<style id="h5-playable-css">`），而工具自身 bundle 里就含这些模板字符串 → 正则命中主脚本内部并把游戏 JS 切掉一大段，游戏代码从未运行。现仅在 `<script>` 之外的标记上编辑（`editOutsideScripts`）。另：试玩壳不再 `remove()` 编辑器面板（改为隐藏），避免自动演示时 `updateButtons` 报错。
+- **新渠道**：`applovin/`（MRAID 2.0，`mraid.open`）、`facebook/`（单 HTML ≤2MB，`FbPlayableAd.onCTAClick()`）、`moloco/`（单 HTML <5MB，不含 MRAID 脚本，`FbPlayableAd.onCTAClick()`）、`unity/`（MRAID 注入，ready+viewable 后再开始，`mraid.open`）。「全部」= 8 渠道。
+- `npm run test:h5`：每个渠道起 http 服务用 Playwright 打开（1024×500 + 390×844，默认 / adaptive / iphone-13 / 大手指图），断言舞台**非黑**、无 console/page error、CTA 钩子存在。设置版本 26（旧「全部」渠道值自动升级）。
+
 ## v25：H5 机型分辨率对齐 Chrome DevTools
 - 修正：iPhone 14 Pro Max → **430×932**；Galaxy Z Fold 5 外屏 → **344×882**；iPad Pro 13 → **1032×1376**。新增 `iphone-14-plus` 428×926。设置版本 25。`npm run test:h5`。
 

@@ -10,7 +10,7 @@ import { exportH5PlayableFromPage, applyPlayableMode, fetchBaseHtml, buildPlayab
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 25;
+const SETTINGS_VERSION = 26;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -111,6 +111,8 @@ function migrate(j, fromStorage = false) {
   // v23：H5 试玩多尺寸自适应（contain/letterbox），无新设置键
   // v24：H5 预览机型/尺寸（预览+导出共用 h5Device/W/H）
   // v25：H5 机型分辨率对齐 Chrome（14 Pro Max 430×932、Fold5 外屏 344×882、iPad Pro 13 1032×1376；新增 14 Plus）
+  // v26：H5 黑屏修复 + 新渠道（applovin/facebook/moloco/unity）。旧「全部」值升级为 8 渠道全部
+  if (j.h5Format === 'tiktok,google,mintegral,generic') j.h5Format = 'applovin,facebook,google,mintegral,moloco,tiktok,unity,generic';
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
   if (fromStorage && (j.settingsVersion || 1) < 16 && Object.keys(j).length > 1) {

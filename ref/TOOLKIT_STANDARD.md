@@ -101,14 +101,18 @@ audio/mix.wav  audio/sfx_*.wav
 ```
 <tool>_h5_playable_YYYYMMDD_HHMMSS.zip
   README_H5.md
-  tiktok/index.html
-  tiktok/config.json          {"playable_orientation":1}
+  applovin/index.html         MRAID 2.0
+  facebook/index.html         ≤2MB
   google/index.html
   mintegral/index.html
+  moloco/index.html
+  tiktok/index.html
+  tiktok/config.json          {"playable_orientation":1}
+  unity/index.html            MRAID (injected)
   generic/index.html
   generic/README.txt
 ```
-- 仅包含用户在 `h5Format` 中勾选的渠道；默认四个全开。
+- 仅包含用户在 `h5Format` 中勾选的渠道；默认全部 8 个（applovin/facebook/google/mintegral/moloco/tiktok/unity/generic）全开；旧默认值 `tiktok,google,mintegral,generic` 视为「全部」。
 - 每个渠道的 `index.html` 为**自包含**单文件试玩：内嵌当前设置（`window.__PLAYABLE__`），**不显示**设置面板 / 顶部工具栏，仅游戏画布 + CTA 条 + 可选教程手指。
 - **多尺寸自适应（responsive playable）**：不得只按固定 720×1280 CSS 盒子导出。舞台在手机（SE→14 Pro Max、Pixel、Galaxy…）、平板（iPad Mini/Air/Pro、Surface）、折叠屏（Z Fold 外屏、Duo）等视口上须可玩。缩放策略默认 **contain / letterbox**：保持设计画幅比例（`canvasW×canvasH` 或 9:16），居中等比缩放，letterbox 条与背景色一致；全视口 `100vw`/`100dvh` + `safe-area-inset-*`；CTA 底部 sticky 并预留 safe-area。
 - 目标：单渠道与总 ZIP 尽量 < `h5MaxMb`（默认 5MB）。超限时 UI 警告；可尝试 minify、去掉 AE 录制器逻辑（playable 构建不跑 AE）、压缩贴图。three.js 体量大时文档说明已知限制。
@@ -119,6 +123,10 @@ audio/mix.wav  audio/sfx_*.wav
 | TikTok / Pangle | `window.openAppStore()`（若存在），否则 `location.href = storeUrl`；可带 playable-sdk 文档化 script 注释 |
 | Google Ads Playable | `ExitApi.exit()`（附 ExitApi stub / 注释，按 Google HTML5 试玩规范）；相对路径；portrait meta |
 | Mintegral | `window.install()` → 否则 `window.gameEnd()` → 否则 `location.href = storeUrl` |
+| AppLovin | MRAID 2.0：head 引入 MRAID 脚本标签；等 `ready`；`mraid.open(storeUrl)`；单 HTML ≤5MB |
+| Meta (Facebook) | 单 `index.html` ≤**2MB**，资源全内联，无外部请求；`FbPlayableAd.onCTAClick()`（超 2MB 告警） |
+| Moloco | 单 HTML <5MB；**不得**引入 MRAID 脚本 / XHR；`FbPlayableAd.onCTAClick()`（Moloco 官方规范） |
+| Unity Ads | MRAID 由 webview 注入（不加脚本标签）；`ready` + `viewableChange` 可见后再开始；`mraid.open(storeUrl)`；单 index.html <5MB |
 | Generic offline | 点击打开 `h5StoreUrl`（`window.open` / `location.href`），无跳转环；附 `README.txt` |
 
 ### 5.3 试玩壳（playable shell）
@@ -129,7 +137,8 @@ audio/mix.wav  audio/sfx_*.wav
 - `h5Orientation` / `config.json` `playable_orientation`：`1` 竖屏，`2` 横屏，`0` 双端。双端时横屏设备仍用 contain 放下竖屏内容（可玩、不裁切），勿写死仅竖屏视口。
 - `h5Device` / `h5DeviceW` / `h5DeviceH`：**预览与导出共用**。`adaptive` → 设计画幅 = `canvasW×canvasH`，全机型 contain/letterbox；指定机型或 `custom` → 设计画幅锁定为 W×H，导出烘焙 `canvasW/H`（及麻将 `recRes`）、`designW/H`、`ad.size`、README「本包目标尺寸」。编辑器非 adaptive 时显示设备预览框。
 - `resize` / `orientationchange` / `visualViewport`：调用 `window.__h5FitStage()` 重算舞台 CSS；`window.__h5StageLayout` 暴露 `{designW,designH,cssW,cssH,scale,…}`。2D 画布靠 CSS 缩放（点击已用 `getBoundingClientRect`）；three.js 工具可在 `applyPlayableMode({ onResize })` 里 `setSize` + 更新 camera aspect。
-- 测试：`npm run test:h5` 须覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、430×932、768×1024、1032×1376、344×882、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
+- **注入/剥离只能作用于 `<script>` 之外的标记**（`editOutsideScripts`）：工具 bundle 内含本模块的模板字符串（`<style id="h5-playable-css">`、`window.__PLAYABLE__`），全文正则会切断主脚本 → 舞台全黑（v24/v25 事故）。
+- 测试：`npm run test:h5` 须解压 ZIP、对**每个渠道**目录起 http 服务用 Playwright 打开，断言：无 console/page error、舞台画布 **非黑**（采样像素非黑比例）、CTA 钩子存在；并覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、430×932、768×1024、1032×1376、344×882、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
 
 ### 5.4 共享 API
 ```js

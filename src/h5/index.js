@@ -7,7 +7,46 @@
 import { makeZip } from './zip.js';
 import README_H5 from './README_H5.js';
 
-export const ALL_FORMATS = ['tiktok', 'google', 'mintegral', 'generic'];
+export const ALL_FORMATS = ['applovin', 'facebook', 'google', 'mintegral', 'moloco', 'tiktok', 'unity', 'generic'];
+/** Legacy v22–v25 default ("全部" before new channels) → treated as all. */
+const LEGACY_ALL = 'tiktok,google,mintegral,generic';
+/** Per-channel single-HTML size limits (bytes) from official specs. */
+export const CHANNEL_LIMITS = {
+  applovin: { mb: 5, note: 'AppLovin: single HTML ≤5MB, MRAID 2.0, mraid.open()' },
+  facebook: { mb: 2, note: 'Meta: single index.html ≤2MB, FbPlayableAd.onCTAClick()' },
+  google: { mb: 5, note: 'Google Ads: ≤5MB, ExitApi.exit()' },
+  mintegral: { mb: 5, note: 'Mintegral: ≤5MB, window.install()' },
+  moloco: { mb: 5, note: 'Moloco: single HTML <5MB, no MRAID script / XHR, FbPlayableAd.onCTAClick()' },
+  tiktok: { mb: 5, note: 'TikTok/Pangle: ≤5MB, openAppStore()' },
+  unity: { mb: 5, note: 'Unity Ads: single index.html <5MB, MRAID (injected), wait ready+viewable, mraid.open()' },
+  generic: { mb: 5, note: 'Generic offline' },
+};
+/** Channels whose runtime is an MRAID webview. */
+const MRAID_FORMATS = ['applovin', 'unity'];
+// Built at runtime (array join is not constant-folded by esbuild) so the literal
+// file name never appears in the bundle — Moloco's validator rejects any mention of it.
+const MRAID_JS_TAG = ['<scr', 'ipt src="', ['mraid', 'js'].join('.'), '"><', '/scr', 'ipt>'].join('');
+
+/**
+ * Apply fn only to the parts of html OUTSIDE <script>…</script> bodies.
+ * The tool bundle itself contains this module's template strings (e.g. the
+ * playable <style id="h5-playable-css"> and <script>window.__PLAYABLE__ text),
+ * so whole-document regexes used to match INSIDE the main script and cut it
+ * in half → game JS never ran → black stage (v24/v25 bug).
+ */
+export function editOutsideScripts(html, fn) {
+  const re = /<script\b[^>]*>[\s\S]*?<\/script>/gi;
+  let out = '', last = 0, m;
+  const parts = [];
+  while ((m = re.exec(html))) { parts.push([html.slice(last, m.index), false]); parts.push([m[0], true]); last = m.index + m[0].length; }
+  parts.push([html.slice(last), false]);
+  // Existing playable boot script (re-export) is removed as a whole.
+  for (const [seg, isScript] of parts) {
+    if (isScript) { if (/^<script>\s*window\.__PLAYABLE__=/.test(seg) || /^<script src="mraid[.]js">/.test(seg)) continue; out += seg; }
+    else out += fn(seg);
+  }
+  return out;
+}
 export const DEFAULT_STORE = 'https://play.google.com/store/apps/details?id=com.example.game';
 
 /** Default design aspect (portrait-first playable). */
@@ -187,7 +226,7 @@ export function buildH5Readme(device) {
 }
 
 export function parseFormats(h5Format) {
-  if (!h5Format || h5Format === 'all') return [...ALL_FORMATS];
+  if (!h5Format || h5Format === 'all' || h5Format === LEGACY_ALL) return [...ALL_FORMATS];
   if (Array.isArray(h5Format)) return h5Format.filter(f => ALL_FORMATS.includes(f));
   const parts = String(h5Format).split(/[,|;\s]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
   const out = [...new Set(parts.filter(f => ALL_FORMATS.includes(f)))];
@@ -218,6 +257,12 @@ function ctaShim(format, storeUrl) {
   }
   if (format === 'google') {
     return `window.ExitApi=window.ExitApi||{exit:function(){try{location.href=${url};}catch(e){}}};function __h5Install(){try{if(window.ExitApi&&typeof ExitApi.exit==='function'){ExitApi.exit();return;}}catch(e){}try{location.href=${url};}catch(e){}}`;
+  }
+  if (format === 'facebook' || format === 'moloco') {
+    return `function __h5Install(){try{if(window.FbPlayableAd&&typeof FbPlayableAd.onCTAClick==='function'){FbPlayableAd.onCTAClick();return;}}catch(e){}try{window.open(${url},'_blank');}catch(e){}}`;
+  }
+  if (MRAID_FORMATS.includes(format)) {
+    return `function __h5Install(){try{if(window.mraid&&typeof mraid.open==='function'){mraid.open(${url});return;}}catch(e){}try{window.open(${url},'_blank');}catch(e){}}`;
   }
   if (format === 'mintegral') {
     return `function __h5Install(){try{if(typeof window.install==='function'){window.install();return;}}catch(e){}try{if(typeof window.gameEnd==='function'){window.gameEnd();return;}}catch(e){}try{location.href=${url};}catch(e){}}`;
@@ -260,11 +305,28 @@ html.h5-playable,body.h5-playable{width:100vw!important;height:100vh!important;h
  * Inline boot: mount CTA + responsive fitStage (contain) on resize/orientationchange.
  * Exposes window.__h5FitStage / window.__h5StageLayout for tools & tests.
  */
+/**
+ * window.__h5WhenViewable(cb): MRAID channels wait for ready (+ viewable) before
+ * starting autoplay; non-MRAID / no SDK present → immediate. Fires
+ * 'h5-playable-viewable' events {detail:boolean} on viewableChange.
+ */
+function viewableGate(format) {
+  if (!MRAID_FORMATS.includes(format)) return 'window.__h5WhenViewable=function(cb){cb();};';
+  return `(function(){var q=[],done=false;function fire(){if(done)return;done=true;var a=q;q=[];a.forEach(function(f){try{f()}catch(e){}});}
+window.__h5WhenViewable=function(cb){if(done)cb();else q.push(cb);};
+function vis(v){try{window.dispatchEvent(new CustomEvent('h5-playable-viewable',{detail:!!v}));}catch(e){}if(v)fire();}
+function onReady(){try{mraid.addEventListener('viewableChange',vis);}catch(e){}var v=true;try{v=mraid.isViewable();}catch(e){}if(v)fire();}
+function boot(){var m=window.mraid;if(!m){fire();return;}try{if(m.getState()==='loading'){m.addEventListener('ready',onReady);}else onReady();}catch(e){fire();}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+setTimeout(function(){if(!window.mraid)fire();},1500);})();`;
+}
+
 function playableBootScript(payload, format) {
   const shim = ctaShim(format, payload.storeUrl);
   return `<script>
 window.__PLAYABLE__=${escJson(payload)};
 ${shim}
+${viewableGate(format)}
 (function(){
   var P=window.__PLAYABLE__||{};
   var CTA_RESERVE=72;
@@ -333,7 +395,7 @@ ${shim}
       b.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();__h5Install();});
       bar.appendChild(b);document.body.appendChild(bar);
     }
-    var panel=document.getElementById('panel'); if(panel) panel.remove();
+    var panel=document.getElementById('panel'); /* hide, never remove: tools still look up editor nodes (e.g. updateButtons) */ if(panel){panel.style.display='none';panel.setAttribute('aria-hidden','true');}
     document.documentElement.classList.add('h5-playable');
     document.body.classList.add('h5-playable');
     fitStage();
@@ -368,6 +430,10 @@ function channelHeadExtras(format, orientation, design) {
   if (format === 'tiktok') {
     parts.push('<!-- TikTok/Pangle playable: prefer window.openAppStore() on CTA. Optional SDK script may be injected by network. -->');
   }
+  if (format === 'applovin') parts.unshift(MRAID_JS_TAG + '\n<!-- AppLovin: MRAID 2.0; CTA mraid.open(storeUrl); single HTML ≤5MB -->');
+  if (format === 'unity') parts.push('<!-- Unity Ads: MRAID injected by webview; start after ready + viewableChange; CTA mraid.open(storeUrl) -->');
+  if (format === 'facebook') parts.push('<!-- Meta playable: single index.html ≤2MB, all assets inline, CTA FbPlayableAd.onCTAClick() -->');
+  if (format === 'moloco') parts.push('<!-- Moloco: single HTML <5MB, no external requests, CTA FbPlayableAd.onCTAClick() -->');
   if (format === 'mintegral') {
     parts.push('<!-- Mintegral: window.install() / window.gameEnd() on CTA. -->');
   }
@@ -415,16 +481,18 @@ export function makePlayableHtml(baseHtml, opts = {}) {
   };
   let html = String(baseHtml);
   // Ensure we don't nest playable twice
-  html = html.replace(/<script>\s*window\.__PLAYABLE__[\s\S]*?<\/script>/i, '');
-  html = html.replace(/<style id="h5-playable-css">[\s\S]*?<\/style>/i, '');
-  // Replace any existing viewport with playable one (avoid duplicates)
-  html = html.replace(/<meta[^>]+name=["']viewport["'][^>]*>/gi, '');
   const inject = channelHeadExtras(format, orientation, { w: designW, h: designH, id: device.id }) + '\n' + playableCss(letterboxBg(settings)) + '\n' + playableBootScript(payload, format);
-  if (/<\/head>/i.test(html)) html = html.replace(/<\/head>/i, inject + '\n</head>');
-  else html = inject + html;
-  // Title hint
-    const titleExtra = device.adaptive ? '' : (' · ' + designW + '×' + designH);
-  html = html.replace(/<title>[^<]*<\/title>/i, '<title>' + (payload.gameName || payload.toolId) + ' · H5试玩' + titleExtra + '</title>');
+  const titleExtra = device.adaptive ? '' : (' · ' + designW + '×' + designH);
+  let injected = false;
+  // IMPORTANT: only edit markup outside <script> bodies (bundle contains these same strings).
+  html = editOutsideScripts(html, (seg) => {
+    seg = seg.replace(/<style id="h5-playable-css">[\s\S]*?<\/style>/gi, '');
+    seg = seg.replace(/<meta[^>]+name=["'](viewport|ad\.orientation|ad\.size|h5\.device|h5\.design)["'][^>]*>/gi, '');
+    seg = seg.replace(/<title>[^<]*<\/title>/i, '<title>' + (payload.gameName || payload.toolId) + ' · H5试玩' + titleExtra + '</title>');
+    if (!injected && /<\/head>/i.test(seg)) { seg = seg.replace(/<\/head>/i, inject + '\n</head>'); injected = true; }
+    return seg;
+  });
+  if (!injected) html = inject + html;
   return html;
 }
 
@@ -485,7 +553,8 @@ export async function buildPlayableZip({ toolId, formats, baseHtml, opts = {} })
   let warn;
   if (totalBytes > maxMb * 1048576) warn = 'ZIP 约 ' + (totalBytes / 1048576).toFixed(2) + ' MB，超过 ' + maxMb + ' MB 告警阈值';
   for (const f of fmts) {
-    if (sizes[f] > maxMb * 1048576) warn = (warn ? warn + '；' : '') + f + ' 的 index.html 未压缩约 ' + (sizes[f] / 1048576).toFixed(2) + ' MB';
+    const lim = Math.min(maxMb, (CHANNEL_LIMITS[f] && CHANNEL_LIMITS[f].mb) || maxMb);
+    if (sizes[f] > lim * 1048576) warn = (warn ? warn + '；' : '') + f + ' 的 index.html 未压缩约 ' + (sizes[f] / 1048576).toFixed(2) + ' MB（渠道上限 ' + lim + ' MB）';
   }
   return { blob, name, sizes, totalBytes, formats: fmts, warn };
 }
@@ -527,7 +596,8 @@ export function applyPlayableMode(hooks = {}) {
   setTimeout(runFit, 0);
   setTimeout(runFit, 200);
   if (P.autoPlay && typeof hooks.autoPlay === 'function') {
-    setTimeout(() => { try { hooks.autoPlay(); } catch (e) { console.warn('playable autoPlay', e); } }, 600);
+    const go = () => setTimeout(() => { try { hooks.autoPlay(); } catch (e) { console.warn('playable autoPlay', e); } }, 600);
+    if (typeof window.__h5WhenViewable === 'function') window.__h5WhenViewable(go); else go();
   }
   return { active: true, autoPlay: !!P.autoPlay, format: P.format || 'generic', fit: runFit };
 }

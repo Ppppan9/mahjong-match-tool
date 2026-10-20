@@ -99,3 +99,12 @@ if (!smoke.ok) {
   process.exit(1);
 }
 console.log('Responsive OK', smoke.results.length, 'viewports');
+
+// Per-channel black-stage + console-error + CTA-hook smoke (all channels)
+{
+  const { runAllChannelChecks } = await import('../src/h5/channel-smoke.mjs');
+  const ch = await runAllChannelChecks({ baseHtml, toolId: 'mahjong-match-tool', outDir, fixturesDir: path.join(root, 'src/h5/fixtures') });
+  fs.writeFileSync(path.join(outDir, 'h5_channel_sizes.json'), JSON.stringify(ch.sizes, null, 2));
+  if (!ch.ok) { console.error('FAIL channel smoke'); process.exit(1); }
+  console.log('Channel smoke OK', Object.entries(ch.sizes).map(([k, v]) => k + '=' + (v / 1048576).toFixed(2) + 'MB').join(' '));
+}

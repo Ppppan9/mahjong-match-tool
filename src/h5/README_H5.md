@@ -17,12 +17,18 @@
 
 ## 目录
 
-| 文件夹 | 渠道 | CTA |
-|--------|------|-----|
-| `tiktok/` | TikTok / Pangle 试玩 | `window.openAppStore()`，否则打开商店 URL；含 `config.json`（`playable_orientation`） |
-| `google/` | Google Ads Playable | `ExitApi.exit()`（含 stub）；相对路径；竖屏 meta |
-| `mintegral/` | Mintegral | `window.install()` → `window.gameEnd()` → 商店 URL |
-| `generic/` | 通用离线包 | 点击打开商店 URL；附 `README.txt` |
+| 文件夹 | 渠道 | CTA / 运行时 | 单文件上限 |
+|--------|------|-----|-----|
+| `applovin/` | AppLovin | MRAID 2.0：head 引入 MRAID 脚本标签，等 `ready`；`mraid.open(商店URL)` | 5MB |
+| `facebook/` | Meta (Facebook) Playable | 单 `index.html`，资源全内联、无外部请求；`FbPlayableAd.onCTAClick()` | **2MB**（超出会告警） |
+| `google/` | Google Ads Playable | `ExitApi.exit()`（含 stub）；相对路径；竖屏 meta | 5MB / ≤512 文件 |
+| `mintegral/` | Mintegral | `window.install()` → `window.gameEnd()` → 商店 URL | 5MB |
+| `moloco/` | Moloco | 单 HTML，**不得**引入 MRAID 脚本、不得用 XHR / 外部请求；`FbPlayableAd.onCTAClick()`（Moloco 官方要求） | <5MB |
+| `tiktok/` | TikTok / Pangle 试玩 | `window.openAppStore()`，否则打开商店 URL；含 `config.json`（`playable_orientation`） | 5MB |
+| `unity/` | Unity Ads | MRAID 由 webview 注入（无需 script 标签）；`ready` + `viewableChange` 可见后才开始自动演示；`mraid.open(商店URL)` | <5MB |
+| `generic/` | 通用离线包 | 点击打开商店 URL；附 `README.txt` | — |
+
+> MRAID 渠道（AppLovin / Unity）：`window.__h5WhenViewable(cb)` 在 ready 且可见后才启动自动演示；`viewableChange` 以 `h5-playable-viewable` 事件转发。
 
 ## 限制
 

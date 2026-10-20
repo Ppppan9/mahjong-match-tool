@@ -242,7 +242,7 @@ export const DEFAULTS = {
   // v23：H5 多尺寸自适应（壳层，无新键）
   // v24：H5 预览机型/尺寸
   // v25：H5 机型分辨率对齐 Chrome（14 Pro Max 430×932、Fold5 外屏 344×882、iPad Pro 13 1032×1376；新增 14 Plus）
-  h5Format: 'tiktok,google,mintegral,generic',
+  h5Format: 'applovin,facebook,google,mintegral,moloco,tiktok,unity,generic',
   h5Orientation: '1',
   h5Device: 'adaptive',
   h5DeviceW: 390,
@@ -539,7 +539,7 @@ export const SCHEMA = [
   ]},
   { group: '导出 H5 试玩广告', open: true, items: [
     { k: '_exportH5', label: '导出当前设置为自包含 H5 试玩（无编辑器面板，仅游戏+CTA）', type: 'button', action: 'exportH5', text: '⬇ 导出 H5 试玩 ZIP' },
-    S('h5Format', '渠道格式', [['tiktok,google,mintegral,generic', '全部（TikTok+Google+Mintegral+Generic）'], ['tiktok,generic', 'TikTok + Generic'], ['tiktok', '仅 TikTok/Pangle'], ['google', '仅 Google Ads'], ['mintegral', '仅 Mintegral'], ['generic', '仅 Generic 离线']]),
+    S('h5Format', '渠道格式', [['applovin,facebook,google,mintegral,moloco,tiktok,unity,generic', '全部（AppLovin+Facebook+Google+Mintegral+Moloco+TikTok+Unity+Generic）'], ['tiktok,generic', 'TikTok + Generic'], ['applovin', '仅 AppLovin（MRAID）'], ['facebook', '仅 Facebook/Meta（≤2MB）'], ['google', '仅 Google Ads'], ['mintegral', '仅 Mintegral'], ['moloco', '仅 Moloco'], ['tiktok', '仅 TikTok/Pangle'], ['unity', '仅 Unity Ads（MRAID）'], ['generic', '仅 Generic 离线']]),
     S('h5Orientation', '试玩方向', [['0', '双端 (0)'], ['1', '竖屏 (1)'], ['2', '横屏 (2)']]),
     S('h5Device', '预览机型', h5DeviceSelectOptions()),
     R('h5DeviceW', '预览宽度(px)', 240, 1440, 1),
