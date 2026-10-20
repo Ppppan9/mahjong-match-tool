@@ -252,7 +252,7 @@ export const DEFAULTS = {
   h5GameName: '麻将消除',
   h5Icon: '',
   h5MaxMb: 5,
-  h5AutoPlay: true,
+  h5AutoPlay: false,
   // 结束页
   endCard: true,
   endCardHand: false, // v19：结尾页默认不显示手指（含自动通关点按钮动画）；可在面板打开

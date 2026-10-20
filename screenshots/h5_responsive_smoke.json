@@ -192,7 +192,7 @@
         "hasFit": true,
         "playableCss": true
       },
-      "nonBlack": 0.9300278160360799,
+      "nonBlack": 0.9638796618866294,
       "checks": []
     },
     {
@@ -240,7 +240,7 @@
         "hasFit": true,
         "playableCss": true
       },
-      "nonBlack": 0.92656459260868,
+      "nonBlack": 0.9605892786042639,
       "checks": []
     },
     {
@@ -338,7 +338,7 @@
         "playableCss": true
       },
       "letterbox": "side",
-      "nonBlack": 0.930189170426935,
+      "nonBlack": 0.9555709822978132,
       "checks": []
     }
   ],

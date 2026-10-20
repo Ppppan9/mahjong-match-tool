@@ -1,5 +1,12 @@
 # 麻将消除 · 广告玩法复刻工具
 
+## v27：H5 试玩不带手指 + 默认不自动通关（玩家自己玩）
+- 导出的 H5 试玩**不画手指 / 不隐藏鼠标**，手指图片（含默认手指 data URL）不打进包里（也更小）。编辑器、录屏、AE/3D 导出的手指不变。
+- 「打开试玩后自动通关演示」默认**关**（旧存档一次性改为关）；手动打开后仍会演示，但不显示手指。
+- 玩家通关/失败后：底部 CTA 呼吸高亮，点击舞台也跳商店（各渠道 CTA）。
+- 旧「全部」渠道值迁移为 8 渠道。 设置版本 27。
+- `npm run test:h5`：断言包内无手指、autoPlay 默认关、Playwright 鼠标 + 触屏真实点击会改变游戏状态（含 letterbox 缩放）、自动演示到结束页后点舞台/CTA 触发渠道 CTA、舞台非黑、无报错。
+
 ## v26：修复 H5 试玩黑屏 + 新增 AppLovin / Facebook / Moloco / Unity 渠道
 - **修复**：导出的 H5 试玩打开后舞台全黑，只有底部 CTA。原因：导出器用全文正则剥离/注入（`<script>window.__PLAYABLE__…</script>`、`<style id="h5-playable-css">`），而工具自身 bundle 里就含这些模板字符串 → 正则命中主脚本内部并把游戏 JS 切掉一大段，游戏代码从未运行。现仅在 `<script>` 之外的标记上编辑（`editOutsideScripts`）。另：试玩壳不再 `remove()` 编辑器面板（改为隐藏），避免自动演示时 `updateButtons` 报错。
 - **新渠道**：`applovin/`（MRAID 2.0，`mraid.open`）、`facebook/`（单 HTML ≤2MB，`FbPlayableAd.onCTAClick()`）、`moloco/`（单 HTML <5MB，不含 MRAID 脚本，`FbPlayableAd.onCTAClick()`）、`unity/`（MRAID 注入，ready+viewable 后再开始，`mraid.open`）。「全部」= 8 渠道。

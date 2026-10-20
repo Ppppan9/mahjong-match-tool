@@ -6,11 +6,14 @@ import { THEMES, THEME_KEYS, themeDefaults } from './themes/index.js';
 import { initAudio, sfx, resumeAudio, audioTrack, audioState, SFX_NAMES } from './audio.js';
 import { createAERecorder } from './ae/recorder.js';
 import { export3D } from './export3d/export3d.js';
-import { exportH5PlayableFromPage, applyPlayableMode, fetchBaseHtml, buildPlayableZip, applyH5DevicePresetToSettings, markH5DeviceCustomIfSizeEdited, bindEditorDevicePreview } from './h5/index.js';
+import { exportH5PlayableFromPage, applyPlayableMode, isPlayableNoHand, fetchBaseHtml, buildPlayableZip, applyH5DevicePresetToSettings, markH5DeviceCustomIfSizeEdited, bindEditorDevicePreview } from './h5/index.js';
+import { DEFAULT_HAND as __H5_DEFAULT_HAND } from './default_hand.js';
+// H5 试玩由玩家自己玩：导出包内不画手指 / 不隐藏鼠标（编辑器、录制、AE/3D 导出不受影响）
+const H5_NO_HAND = isPlayableNoHand();
 import { generateBoard, solve, repairPartition, validatePartition, isTarget, targetIndex, targetChar, mulberry32 } from './board.js';
 
 const LS_KEY = 'mahjongTool.settings.v1';
-const SETTINGS_VERSION = 26;
+const SETTINGS_VERSION = 27;
 // v1/v2 的旧默认值：本地保存的旧设置若仍是这些旧默认值，则升级为 v3 新默认值（用户手动改过的值保留）
 const OLD_DEFAULTS = {
   cameraTilt: [22, 18, 12], tileThick: [0.42, 0.34], baseRatio: [0.6, 0.55, 0.5], tileRatio: [1.22], cornerRadius: [0.12],
@@ -112,6 +115,8 @@ function migrate(j, fromStorage = false) {
   // v24：H5 预览机型/尺寸（预览+导出共用 h5Device/W/H）
   // v25：H5 机型分辨率对齐 Chrome（14 Pro Max 430×932、Fold5 外屏 344×882、iPad Pro 13 1032×1376；新增 14 Plus）
   // v26：H5 黑屏修复 + 新渠道（applovin/facebook/moloco/unity）。旧「全部」值升级为 8 渠道全部
+  // v27：试玩由玩家自己玩 → h5AutoPlay 默认关（一次性迁移）；H5 导出不含手指
+  if ((j.settingsVersion || 1) < 27 && 'h5AutoPlay' in j) j.h5AutoPlay = false; // 只改已有键：空存档加键会被当成旧存档（主题→国风）
   if (j.h5Format === 'tiktok,google,mintegral,generic') j.h5Format = 'applovin,facebook,google,mintegral,moloco,tiktok,unity,generic';
   // v16（v15.2）：默认设置改为用户导出的配置（中东风主题、seed 20261980、8 层、飞行 400ms/弧度 0.7/sine、用户上传的手指 PNG 与指尖锚点）。
   // 本地旧存档里仍是旧默认值的键 → 删除以取新默认；改过的值保留；导入的 JSON 原样保留
@@ -177,7 +182,7 @@ function loadImg(key) {
 }
 // 有上传手指且开启“手动时显示手指”时，隐藏系统光标，用手指图片当光标
 // 手指出现在画面上时隐藏系统鼠标（hideCursor，三个工具统一）：手动游玩手指跟随指针（指尖锚点 = 指针位置）/ 自动通关手指可见时；结束页隐藏手指时恢复鼠标
-function handCursorHidden() { return !!(S.hideCursor && IMG.handImage && !endCardHidesHand() && (AUTO.running ? HAND.visible : S.manualHand)); }
+function handCursorHidden() { return !H5_NO_HAND && !!(S.hideCursor && IMG.handImage && !endCardHidesHand() && (AUTO.running ? HAND.visible : S.manualHand)); }
 function updateCursor() { const c = handCursorHidden() ? 'none' : 'pointer'; if (canvas.style.cursor !== c) canvas.style.cursor = c; }
 ['bgImage', 'logoImage', 'endIcon', 'handImage'].forEach(loadImg);
 
@@ -1496,6 +1501,7 @@ function endCardHidesHand(now = performance.now()) {
   return !!(S.endCard && !S.endCardHand && G && G.cleared && (now - G.clearT - S.endDelay) >= 0);
 }
 function handState() {
+  if (H5_NO_HAND) return null;
   if (!IMG.handImage || HAND.alpha <= 0.01) return null;
   if (endCardHidesHand()) return null;
   const im = IMG.handImage, w = W * S.handSize, h = w * im.height / im.width;
@@ -1504,6 +1510,7 @@ function handState() {
 }
 // asset：传入固定状态（导出 AE 素材时在原点绘制、未按下）
 function drawHand(asset = null) {
+  if (H5_NO_HAND) return;
   const q = asset || handState(); if (!q) return;
   const im = IMG.handImage;
   const ax = S.handAnchorX * q.w, ay = S.handAnchorY * q.h;
@@ -1989,7 +1996,7 @@ async function export3DZip(rec = aeLastRec) {
 }
 async function exportH5Zip() {
   try {
-    const r = await exportH5PlayableFromPage({ toolId: 'mahjong-match-tool', S, status: (m) => toast(m), toast });
+    const r = await exportH5PlayableFromPage({ toolId: 'mahjong-match-tool', S, stripDataUrls: [__H5_DEFAULT_HAND], status: (m) => toast(m), toast });
     return r;
   } catch (e) { console.error(e); toast('H5 导出失败：' + e.message); return null; }
 }
@@ -2018,8 +2025,10 @@ window.__app = {
 };
 
 const __h5 = applyPlayableMode({
-  applySettings: (ps) => { Object.assign(S, ps); saveSettings(); },
+  applySettings: (ps) => { Object.assign(S, ps); /* playable: don't persist baked settings to localStorage */ },
   autoPlay: () => { try { autoSolve(); } catch (e) { } },
+  state: () => { try { return JSON.stringify(G ? [G.tiles.map(t => t.state), G.selected, G.tray] : null); } catch (e) { return ''; } },
+  isEnded: () => { try { return !!(G && G.cleared); } catch (e) { return false; } },
   onResize: () => { try { layoutViewport(); } catch (e) { /* design buffer + CSS contain */ } },
 });
 if (__h5) { try { const panel = document.getElementById('panel'); if (panel) panel.style.display = 'none'; } catch (e) { } }

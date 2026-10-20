@@ -137,6 +137,7 @@ audio/mix.wav  audio/sfx_*.wav
 - `h5Orientation` / `config.json` `playable_orientation`：`1` 竖屏，`2` 横屏，`0` 双端。双端时横屏设备仍用 contain 放下竖屏内容（可玩、不裁切），勿写死仅竖屏视口。
 - `h5Device` / `h5DeviceW` / `h5DeviceH`：**预览与导出共用**。`adaptive` → 设计画幅 = `canvasW×canvasH`，全机型 contain/letterbox；指定机型或 `custom` → 设计画幅锁定为 W×H，导出烘焙 `canvasW/H`（及麻将 `recRes`）、`designW/H`、`ad.size`、README「本包目标尺寸」。编辑器非 adaptive 时显示设备预览框。
 - `resize` / `orientationchange` / `visualViewport`：调用 `window.__h5FitStage()` 重算舞台 CSS；`window.__h5StageLayout` 暴露 `{designW,designH,cssW,cssH,scale,…}`。2D 画布靠 CSS 缩放（点击已用 `getBoundingClientRect`）；three.js 工具可在 `applyPlayableMode({ onResize })` 里 `setSize` + 更新 camera aspect。
+- **试玩由玩家自己玩**：导出包不得包含/绘制手指（`stripHandForPlayable` 清空 handImage/handShow/manualHand/endCardHand/hideCursor，`stripDataUrls` 去掉 bundle 内默认手指 data URL；工具侧 `isPlayableNoHand()` 守卫 drawHand/handState/handCursorHidden）。`h5AutoPlay` 默认 false。工具须向 `applyPlayableMode` 提供 `state()`（状态签名）与 `isEnded()`；结束后 CTA 高亮且点舞台触发渠道 CTA。test:h5 断言无手指、autoPlay 关、鼠标+触屏点击改变状态、结束页 CTA 生效。
 - **注入/剥离只能作用于 `<script>` 之外的标记**（`editOutsideScripts`）：工具 bundle 内含本模块的模板字符串（`<style id="h5-playable-css">`、`window.__PLAYABLE__`），全文正则会切断主脚本 → 舞台全黑（v24/v25 事故）。
 - 测试：`npm run test:h5` 须解压 ZIP、对**每个渠道**目录起 http 服务用 Playwright 打开，断言：无 console/page error、舞台画布 **非黑**（采样像素非黑比例）、CTA 钩子存在；并覆盖 ZIP 结构 **以及** Playwright 视口冒烟（如 375×667、390×844、430×932、768×1024、1032×1376、344×882、1024×600）：`#stage` 可见、CTA 未被裁切、舞台等比缩放无横向溢出。
 

@@ -233,6 +233,21 @@ export function parseFormats(h5Format) {
   return out.length ? out : [...ALL_FORMATS];
 }
 
+/**
+ * Playable = real player plays: no simulated finger / hand cursor in the export.
+ * Editor, recording, AE/3D exports keep the finger (they never call this).
+ */
+export const H5_HAND_OFF = { handImage: '', handShow: false, manualHand: false, endCardHand: false, hideCursor: false, export3dHand: false };
+export function stripHandForPlayable(S) {
+  const out = { ...(S || {}) };
+  for (const [k, v] of Object.entries(H5_HAND_OFF)) out[k] = v;
+  return out;
+}
+/** True inside an exported playable (tools gate finger drawing on this). */
+export function isPlayableNoHand() {
+  return typeof window !== 'undefined' && !!window.__PLAYABLE__;
+}
+
 /** Slim settings for bake: drop huge dataURLs that bloat the zip; keep small icons. */
 export function slimSettings(S, { maxDataUrl = 180000 } = {}) {
   if (!S || typeof S !== 'object') return {};
@@ -295,6 +310,7 @@ html.h5-playable,body.h5-playable{width:100vw!important;height:100vh!important;h
 #h5-cta button{pointer-events:auto;border:none;border-radius:28px;padding:12px 28px;font:700 16px/1.2 system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
   color:#fff;background:linear-gradient(180deg,#ff7a3c,#ff3d6e);box-shadow:0 6px 20px rgba(255,60,100,.45);cursor:pointer;-webkit-tap-highlight-color:transparent}
 #h5-cta button:active{transform:scale(.97)}
+html.h5-ended #h5-cta button{animation:h5pulse 1s ease-in-out infinite}@keyframes h5pulse{50%{transform:scale(1.08)}}
 #h5-cta .h5-name{color:#fff;font:600 13px/1.2 system-ui,sans-serif;text-shadow:0 1px 4px #000;max-width:36vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #h5-cta img.h5-icon{width:36px;height:36px;border-radius:8px;object-fit:cover;flex:none}
 @media (max-height:500px){#h5-cta{padding:6px 12px calc(6px + env(safe-area-inset-bottom,0px))}#h5-cta button{padding:8px 20px;font-size:14px}#h5-cta img.h5-icon{width:28px;height:28px}}
@@ -452,7 +468,8 @@ export function makePlayableHtml(baseHtml, opts = {}) {
   const orientation = opts.orientation == null ? 1 : +opts.orientation;
   const baked = bakeH5DeviceIntoSettings(opts.settings || {});
   const device = baked.device;
-  const settings = slimSettings(baked.settings);
+  const handSrc = baked.settings && typeof baked.settings.handImage === 'string' ? baked.settings.handImage : '';
+  const settings = slimSettings(stripHandForPlayable(baked.settings));
   let designW, designH;
   if (device.adaptive) {
     designW = +(settings.canvasW || settings.width || 0);
@@ -474,12 +491,17 @@ export function makePlayableHtml(baseHtml, opts = {}) {
     gameName: opts.gameName || '',
     icon: opts.icon || '',
     orientation,
-    autoPlay: opts.autoPlay !== false,
+    autoPlay: opts.autoPlay === true,
+    noHand: true,
     designW,
     designH,
     device: { id: device.id, label: device.label, w: designW, h: designH, adaptive: !!device.adaptive },
   };
   let html = String(baseHtml);
+  // Drop finger image data URLs (current + tool default) from the bundled JS too.
+  for (const d of [handSrc, ...(opts.stripDataUrls || [])]) {
+    if (typeof d === 'string' && d.startsWith('data:') && d.length > 200) html = html.split(d).join('');
+  }
   // Ensure we don't nest playable twice
   const inject = channelHeadExtras(format, orientation, { w: designW, h: designH, id: device.id }) + '\n' + playableCss(letterboxBg(settings)) + '\n' + playableBootScript(payload, format);
   const titleExtra = device.adaptive ? '' : (' · ' + designW + '×' + designH);
@@ -592,6 +614,29 @@ export function applyPlayableMode(hooks = {}) {
       }
     });
   } catch (e) { /* ignore */ }
+  // Test/runtime probes: game-state signature + ended flag.
+  try {
+    window.__h5State = () => (typeof hooks.state === 'function' ? hooks.state() : '');
+    window.__h5Ended = () => (typeof hooks.isEnded === 'function' ? !!hooks.isEnded() : false);
+  } catch (e) { /* ignore */ }
+  // Game end (win or fail) → highlight CTA; a tap on the stage after the end goes to the store.
+  if (typeof hooks.isEnded === 'function') {
+    let endedAt = 0;
+    const poll = setInterval(() => {
+      let e = false; try { e = !!hooks.isEnded(); } catch (x) { /* ignore */ }
+      if (e && !endedAt) {
+        endedAt = Date.now();
+        try { document.documentElement.classList.add('h5-ended'); window.dispatchEvent(new CustomEvent('h5-playable-end')); } catch (x) { /* ignore */ }
+      } else if (!e && endedAt) { endedAt = 0; try { document.documentElement.classList.remove('h5-ended'); } catch (x) { /* ignore */ } }
+    }, 250);
+    try {
+      const st = document.getElementById('stage');
+      if (st) st.addEventListener('pointerup', () => {
+        if (endedAt && Date.now() - endedAt > 600 && typeof window.__h5Install === 'function') { try { window.__h5Install(); } catch (x) { /* ignore */ } }
+      });
+    } catch (e) { /* ignore */ }
+    void poll;
+  }
   // Defer fit until after first paint / canvas exists
   setTimeout(runFit, 0);
   setTimeout(runFit, 200);
@@ -625,7 +670,7 @@ export async function fetchBaseHtml() {
   throw new Error('无法读取工具自身 HTML（请用 http/https 打开后再导出；file:// 不支持）。' + (lastErr ? ' (' + lastErr.message + ')' : ''));
 }
 
-export async function exportH5PlayableFromPage({ toolId, S, status, toast } = {}) {
+export async function exportH5PlayableFromPage({ toolId, S, status, toast, ...opts } = {}) {
   const say = (m) => { if (status) status(m); if (toast) toast(m); };
   say('正在打包 H5 试玩…');
   const baseHtml = await fetchBaseHtml();
@@ -641,7 +686,8 @@ export async function exportH5PlayableFromPage({ toolId, S, status, toast } = {}
       gameName: (S && S.h5GameName) || '',
       icon: (S && S.h5Icon) || '',
       orientation: S && S.h5Orientation != null ? +S.h5Orientation : 1,
-      autoPlay: !(S && S.h5AutoPlay === false),
+      autoPlay: !!(S && S.h5AutoPlay === true),
+      stripDataUrls: opts.stripDataUrls || [],
       h5MaxMb: (S && S.h5MaxMb) || 5,
     },
   });
